@@ -24,6 +24,24 @@ Built for **linux/amd64** via GitHub Actions — no local cross-compilation need
     └── build-image-dockerhub.yml      # Build & push to Docker Hub (alternative)
 ```
 
+## Dockerfile vs Dockerfile.baked
+
+This repo includes two Dockerfiles for different use cases:
+
+**`Dockerfile`** downloads the model from HuggingFace at boot time every time the container starts. The image itself is small, but each cold start takes ~2 minutes while it pulls model weights.
+
+**`Dockerfile.baked`** downloads the model at build time and bakes the weights into the image. The image is large, but boots instantly with zero download. It uses a multi-stage build to download weights on your native architecture (arm64 on Apple Silicon) and copy them into the amd64 runtime image, avoiding slow QEMU emulation.
+
+| | `Dockerfile` | `Dockerfile.baked` |
+|---|---|---|
+| Image size | ~5-10 GB | ~25-30 GB |
+| Boot time | ~2 min (downloads model) | ~20 sec (model already loaded) |
+| Build time | Fast | Slow (downloads model during build) |
+| Change models | Edit CMD, rebuild small image | Edit build arg, rebuild large image |
+| Registry cost | Minimal | Higher (storing 25+ GB image) |
+
+Use `Dockerfile` if you're fine with a short wait on boot. Use `Dockerfile.baked` if you want instant startup and don't mind the larger image and registry costs.
+
 ## Workflows
 
 ### GHCR (default)
