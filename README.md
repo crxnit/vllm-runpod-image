@@ -15,7 +15,7 @@ Built for **linux/amd64** via GitHub Actions — no local cross-compilation need
 
 ```
 ├── Dockerfile                          # Standard image (downloads model at boot)
-├── Dockerfile.baked                    # Multi-stage image (model weights baked in)
+├── Dockerfile.baked                    # Single-stage image (model weights baked in)
 ├── scripts/
 │   ├── pre_start.sh                   # RunPod pre-start hook
 │   └── post_start.sh                  # RunPod post-start hook
@@ -30,7 +30,7 @@ This repo includes two Dockerfiles for different use cases:
 
 **`Dockerfile`** downloads the model from HuggingFace at boot time every time the container starts. The image itself is small, but each cold start takes ~2 minutes while it pulls model weights.
 
-**`Dockerfile.baked`** downloads the model at build time and bakes the weights into the image. The image is large, but boots instantly with zero download. It uses a multi-stage build to download weights on your native architecture (arm64 on Apple Silicon) and copy them into the amd64 runtime image, avoiding slow QEMU emulation.
+**`Dockerfile.baked`** downloads the model at build time and bakes the weights into the image. The image is large, but boots instantly with zero download. It uses a single-stage build — designed to run via **GitHub Actions** where the runner is native amd64 (no emulation). Building this locally on Apple Silicon is not recommended due to QEMU overhead.
 
 | | `Dockerfile` | `Dockerfile.baked` |
 |---|---|---|
@@ -71,15 +71,19 @@ CMD ["vllm", "serve", "your-model-name", \
 
 ### Bake model weights into the image
 
-Use `Dockerfile.baked` for zero-download boot. Change the model by setting the build arg:
+Use `Dockerfile.baked` for zero-download boot. Build via GitHub Actions (recommended — native amd64, no emulation):
 
 ```bash
-docker buildx build --platform linux/amd64 \
-  -f Dockerfile.baked \
-  --build-arg MODEL=Qwen/Qwen2.5-Coder-7B-Instruct \
-  -t youruser/vllm-coder-baked:latest \
-  --push .
+# Default model (Qwen2.5-Coder-32B-AWQ)
+gh workflow run build-image-baked.yml
+
+# Custom model
+gh workflow run build-image-baked.yml -f model=Qwen/Qwen2.5-Coder-7B-Instruct
 ```
+
+The baked workflow frees disk space on the runner before building to accommodate large model weights. The image is tagged as `baked-latest` and `baked-<model-name>`.
+
+Note: building `Dockerfile.baked` locally on Apple Silicon is not recommended — downloading 20 GB of model weights under QEMU emulation is extremely slow. Use GitHub Actions instead.
 
 ### Add dependencies
 
