@@ -5,12 +5,12 @@
 #   docker buildx build --platform linux/amd64 -f Dockerfile.baked -t youruser/vllm-coder-baked:latest --push .
 
 # Stage 1: Download model weights on the build host's native architecture (fast, no emulation)
-FROM --platform=$BUILDPLATFORM python:3.11-slim AS downloader
+FROM --platform=$BUILDPLATFORM python:3.11 AS downloader
 
-RUN pip install --no-cache-dir huggingface_hub[cli]
+RUN pip install --no-cache-dir "huggingface_hub[cli,hf_xet]"
 
 ARG MODEL=Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
-RUN python -m huggingface_hub.commands.huggingface_cli download ${MODEL} --local-dir /models/weights
+RUN huggingface-cli download ${MODEL} --local-dir /models/weights
 
 # Stage 2: amd64 runtime image with vLLM + pre-downloaded weights
 FROM --platform=linux/amd64 vllm/vllm-openai:v0.6.3
