@@ -10,7 +10,7 @@ FROM --platform=$BUILDPLATFORM python:3.11 AS downloader
 RUN pip install --no-cache-dir "huggingface_hub[cli,hf_xet]"
 
 ARG MODEL=Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
-RUN huggingface-cli download ${MODEL} --local-dir /models/weights
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL}', local_dir='/models/weights')"
 
 # Stage 2: amd64 runtime image with vLLM + pre-downloaded weights
 FROM --platform=linux/amd64 vllm/vllm-openai:v0.6.3
