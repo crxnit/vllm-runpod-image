@@ -1,0 +1,79 @@
+name: Build baked vLLM image for RunPod
+
+# Manual trigger only — baked builds download model weights and are slow (~10-20 min).
+# Trigger via CLI:  gh workflow run build-image-baked.yml
+# Trigger with custom model:  gh workflow run build-image-baked.yml -f model=Qwen/Qwen2.5-Coder-7B-Instruct
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "HuggingFace model ID to bake into the image"
+        required: false
+        default: "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Generate a short tag from the model name (e.g., Qwen/Qwen2.5-Coder-32B-Instruct-AWQ → qwen2.5-coder-32b-instruct-awq)
+      - name: Generate model tag
+        id: model-tag
+        run: |
+          MODEL="${{ github.event.inputs.model }}"
+          TAG=$(echo "$MODEL" | sed 's|.*/||' | tr '[:upper:]' '[:lower:]')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Model: $MODEL"
+          echo "Tag: $TAG"
+
+      - name: Build and push baked image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.baked
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            MODEL=${{ github.event.inputs.model }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-${{ steps.model-tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-${{ github.sha }}
+          cache-from: type=gha,scope=baked
+          cache-to: type=gha,scope=baked,mode=max
+
+      - name: Print image details
+        run: |
+          echo "Image pushed successfully!"
+          echo ""
+          echo "Tags:"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-latest"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-${{ steps.model-tag.outputs.tag }}"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-${{ github.sha }}"
+          echo ""
+          echo "Model: ${{ github.event.inputs.model }}"
+          echo ""
+          echo "Use in RunPod template:"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-latest"
