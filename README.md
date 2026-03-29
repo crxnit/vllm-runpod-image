@@ -85,11 +85,25 @@ docker buildx build --platform linux/amd64 \
 
 Add `RUN pip install ...` lines to the Dockerfile.
 
-### GHCR visibility
+### GHCR visibility and cost
 
-GHCR images are private by default. To let RunPod pull the image:
-- **Make public:** GitHub profile → Packages → select image → Package settings → Change visibility → Public
-- **Or use private registry auth:** Configure credentials in RunPod Console → Container Registry
+GHCR images are **private by default**. Storage cost depends on package visibility:
+
+| Package Visibility | Storage | Bandwidth |
+|---|---|---|
+| **Public** | Free | Free |
+| **Private** (free plan) | 500 MB included | 1 GB included |
+| **Private** (overage) | $0.25/GB/mo | $0.50/GB/mo |
+
+A private `Dockerfile` image (~5-10 GB) costs roughly $1-2.50/mo. A private `Dockerfile.baked` image (~25-30 GB) costs $6-7.50/mo.
+
+**Recommended:** Make the container package public — the repo stays private, but the image (which just contains vLLM + pip packages, no proprietary code) is publicly pullable at zero cost. RunPod can pull it without any registry auth configuration.
+
+To make the package public after the first build:
+GitHub profile → Packages → `vllm-runpod-image` → Package settings → Change visibility → Public
+
+To keep everything private, configure RunPod to authenticate:
+RunPod Console → Container Registry → add GHCR credentials (username + GitHub PAT with `read:packages` scope)
 
 ## Local build (from Mac)
 
