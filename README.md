@@ -77,11 +77,17 @@ Use `Dockerfile.baked` for zero-download boot. Build via GitHub Actions (recomme
 # Default model (Qwen2.5-Coder-32B-AWQ)
 gh workflow run build-image-baked.yml
 
-# Custom model
-gh workflow run build-image-baked.yml -f model=Qwen/Qwen2.5-Coder-7B-Instruct
+# Custom AWQ model with custom tag
+gh workflow run build-image-baked.yml -f model=Qwen/Qwen2.5-Coder-7B-Instruct-AWQ -f tag=7b-awq
+
+# Non-quantized model (set quantization to empty)
+gh workflow run build-image-baked.yml -f model=Qwen/Qwen2.5-Coder-7B-Instruct -f quantization="" -f tag=7b-instruct
+
+# Gated model (requires HuggingFace token)
+gh workflow run build-image-baked.yml -f model=meta-llama/Llama-3-8B -f hf_token=hf_xxx -f quantization="" -f tag=llama3-8b
 ```
 
-The baked workflow frees disk space on the runner before building to accommodate large model weights. The image is tagged as `baked-latest` and `baked-<model-name>`.
+The baked workflow frees disk space on the runner before building to accommodate large model weights. By default the image is tagged as `baked-latest` and `baked-<model-name>`. Use `-f tag=<name>` to create separate images without overwriting `baked-latest`.
 
 Note: building `Dockerfile.baked` locally on Apple Silicon is not recommended — downloading 20 GB of model weights under QEMU emulation is extremely slow. Use GitHub Actions instead.
 
