@@ -10,6 +10,10 @@ on:
         description: "HuggingFace model ID to bake into the image"
         required: false
         default: "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+      tag:
+        description: "Custom image tag (instead of baked-latest)"
+        required: false
+        default: "baked-latest"
 
 env:
   REGISTRY: ghcr.io
@@ -73,7 +77,7 @@ jobs:
           build-args: |
             MODEL=${{ github.event.inputs.model }}
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-${{ steps.model-tag.outputs.tag }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-${{ github.sha }}
           cache-from: type=gha,scope=baked
@@ -84,11 +88,11 @@ jobs:
           echo "Image pushed successfully!"
           echo ""
           echo "Tags:"
-          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-latest"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}"
           echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-${{ steps.model-tag.outputs.tag }}"
           echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-${{ github.sha }}"
           echo ""
           echo "Model: ${{ github.event.inputs.model }}"
           echo ""
           echo "Use in RunPod template:"
-          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-latest"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}"
