@@ -3,6 +3,7 @@
 
 # Docker
 *.tar
+buildfiles/
 
 # Models (don't commit weights to git)
 models/

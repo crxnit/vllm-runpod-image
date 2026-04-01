@@ -17,7 +17,9 @@ ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
 
 # Download model weights directly into the image (no duplication across stages)
 ARG MODEL=Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
-RUN python3 -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL}', local_dir='/models/weights')"
+ARG HF_TOKEN=""
+RUN if [ -n "$HF_TOKEN" ]; then export HF_TOKEN="$HF_TOKEN"; fi && \
+    python3 -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL}', local_dir='/models/weights')"
 
 COPY scripts/pre_start.sh /pre_start.sh
 COPY scripts/post_start.sh /post_start.sh
@@ -25,7 +27,7 @@ RUN chmod +x /pre_start.sh /post_start.sh
 
 EXPOSE 8000
 
-CMD ["vllm", "serve", "/models/weights", \
-     "--quantization", "awq", \
-     "--max-model-len", "16384", \
-     "--port", "8000"]
+ARG QUANTIZATION=awq
+ENV QUANTIZATION=${QUANTIZATION}
+
+CMD sh -c 'if [ -n "$QUANTIZATION" ]; then exec vllm serve /models/weights --quantization "$QUANTIZATION" --max-model-len 16384 --port 8000; else exec vllm serve /models/weights --max-model-len 16384 --port 8000; fi'

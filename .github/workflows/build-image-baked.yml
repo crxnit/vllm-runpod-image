@@ -2,7 +2,8 @@ name: Build baked vLLM image for RunPod
 
 # Manual trigger only — baked builds download model weights and are slow (~10-20 min).
 # Trigger via CLI:  gh workflow run build-image-baked.yml
-# Trigger with custom model:  gh workflow run build-image-baked.yml -f model=Qwen/Qwen2.5-Coder-7B-Instruct
+# Custom model:    gh workflow run build-image-baked.yml -f model=Qwen/Qwen2.5-Coder-7B-Instruct -f quantization="" -f tag=7b-instruct
+# Gated model:     gh workflow run build-image-baked.yml -f model=meta-llama/... -f hf_token=hf_xxx
 on:
   workflow_dispatch:
     inputs:
@@ -10,10 +11,18 @@ on:
         description: "HuggingFace model ID to bake into the image"
         required: false
         default: "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+      quantization:
+        description: "Quantization method (e.g. awq, gptq). Leave empty for non-quantized models."
+        required: false
+        default: "awq"
       tag:
         description: "Custom image tag (instead of baked-latest)"
         required: false
         default: "baked-latest"
+      hf_token:
+        description: "HuggingFace token (for gated models). Use a secret or pass directly."
+        required: false
+        default: ""
 
 env:
   REGISTRY: ghcr.io
@@ -76,6 +85,8 @@ jobs:
           push: true
           build-args: |
             MODEL=${{ github.event.inputs.model }}
+            QUANTIZATION=${{ github.event.inputs.quantization }}
+            HF_TOKEN=${{ github.event.inputs.hf_token }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:baked-${{ steps.model-tag.outputs.tag }}
