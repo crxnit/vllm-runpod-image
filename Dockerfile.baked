@@ -8,7 +8,7 @@
 #   docker buildx build --platform linux/amd64 -f Dockerfile.baked -t youruser/vllm-coder-baked:latest --push .
 #   Consider using GitHub Actions instead to avoid emulation overhead.
 
-FROM vllm/vllm-openai:latest
+FROM vllm/vllm-openai:v0.11.2
 
 RUN pip install --no-cache-dir "huggingface_hub[cli,hf_xet]" tiktoken
 
@@ -30,4 +30,7 @@ EXPOSE 8000
 ARG QUANTIZATION=awq
 ENV QUANTIZATION=${QUANTIZATION}
 
-CMD sh -c 'if [ -n "$QUANTIZATION" ]; then exec vllm serve /models/weights --quantization "$QUANTIZATION" --max-model-len 16384 --port 8000; else exec vllm serve /models/weights --max-model-len 16384 --port 8000; fi'
+COPY scripts/start.sh /start.sh
+RUN chmod +x /start.sh
+
+CMD ["/start.sh"]

@@ -1,4 +1,4 @@
-FROM vllm/vllm-openai:latest
+FROM vllm/vllm-openai:v0.11.2
 
 # Install additional dependencies
 RUN pip install --no-cache-dir huggingface_hub tiktoken
