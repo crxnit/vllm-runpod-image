@@ -4,12 +4,6 @@ name: Build vLLM image for RunPod (Docker Hub)
 # Requires repository secrets: DOCKER_USERNAME and DOCKER_PASSWORD (access token).
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Dockerfile"
-      - "scripts/**"
-      - ".github/workflows/build-image-dockerhub.yml"
   workflow_dispatch:
 
 jobs:
