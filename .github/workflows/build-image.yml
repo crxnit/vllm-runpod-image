@@ -1,15 +1,6 @@
 name: Build vLLM image for RunPod
 
 on:
-  # Auto-build when Dockerfile or workflow changes on main
-  push:
-    branches: [main]
-    paths:
-      - "Dockerfile"
-      - "scripts/**"
-      - ".github/workflows/build-image.yml"
-
-  # Manual trigger from GitHub UI or CLI: gh workflow run build-image.yml
   workflow_dispatch:
 
 env:
@@ -18,7 +9,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-core
 
     permissions:
       contents: read
