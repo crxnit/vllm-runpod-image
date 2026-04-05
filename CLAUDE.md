@@ -53,7 +53,7 @@ All three workflows are **manual dispatch only** (`workflow_dispatch`):
 - `scripts/pre_start.sh` and `scripts/post_start.sh` are RunPod lifecycle hooks. Currently minimal (logging only).
 - The baked Dockerfile downloads weights via `huggingface_hub.snapshot_download()` Python API (not CLI) into `/models/weights`, then serves from that local path.
 - The standard Dockerfile lets vLLM download the model by name at runtime via `CMD`.
-- Model is served on port 8000 with `--max-model-len 16384`. The baked Dockerfile uses a `QUANTIZATION` build arg/env var (default `awq`) to conditionally pass `--quantization` — set to empty for non-quantized models.
+- Model is served on port 8000. `--max-model-len` defaults to 16384 but is configurable via `MAX_MODEL_LEN` env var in the RunPod template (e.g. set to 4096 for 24GB GPUs with 32B models). The baked Dockerfile uses a `QUANTIZATION` build arg/env var (default `awq`) to conditionally pass `--quantization` — set to empty for non-quantized models.
 - `VLLM_WORKER_MULTIPROC_METHOD=spawn` is set in both Dockerfiles for multi-GPU compatibility.
 - Base image is pinned to `vllm/vllm-openai:v0.11.2` (CUDA 12.8). Do not use `latest` — it requires CUDA 12.9 which RunPod drivers don't support.
 

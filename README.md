@@ -115,6 +115,17 @@ Port `22/tcp` enables SSH access. Make sure your SSH public key is added in RunP
 
 Generate an API key with `openssl rand -hex 32`.
 
+Set `MAX_MODEL_LEN` for GPUs with limited VRAM (default: 16384):
+
+```bash
+runpodctl template create \
+  --name "vLLM Qwen3 32B AWQ" \
+  --image "ghcr.io/<your-username>/vllm-runpod-image:qwen3-32b-awq" \
+  --container-disk-in-gb 40 \
+  --ports "8000/http,22/tcp" \
+  --env '{"VLLM_API_KEY":"your-key","MAX_MODEL_LEN":"4096"}'
+```
+
 ### Recommended GPUs
 
 | Model size | Recommended GPUs | Container Disk |
