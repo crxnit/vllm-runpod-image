@@ -150,17 +150,18 @@ def main():
         if sys.stdin.isatty():
             print("Paste log output below (Ctrl+D when done):\n")
         input_file = sys.stdin
+        engine_stats, requests = parse_logs(input_file)
     else:
         input_path = Path(args.input)
         if not input_path.exists():
             print(f"File not found: {args.input}")
             sys.exit(1)
-        input_file = open(input_path)
-
-    engine_stats, requests = parse_logs(input_file)
-
-    if input_file is not sys.stdin:
-        input_file.close()
+        try:
+            with open(input_path) as input_file:
+                engine_stats, requests = parse_logs(input_file)
+        except OSError as e:
+            print(f"Error reading file: {e}")
+            sys.exit(1)
 
     if not engine_stats and not requests:
         print("No vLLM metrics found in input.")

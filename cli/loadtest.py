@@ -51,7 +51,11 @@ TEST_PROMPTS = [
 
 def load_config():
     if CONFIG_PATH.exists():
-        return json.loads(CONFIG_PATH.read_text())
+        try:
+            return json.loads(CONFIG_PATH.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"{YELLOW}Warning: corrupt config file: {e}{RESET}")
+            return {}
     return {}
 
 
@@ -105,7 +109,11 @@ async def send_request(session, url, headers, payload, request_id):
 
     except asyncio.CancelledError:
         error = "cancelled"
-    except Exception as e:
+    except aiohttp.ClientError as e:
+        error = f"connection error: {e}"
+    except asyncio.TimeoutError:
+        error = "request timed out"
+    except OSError as e:
         error = str(e)
 
     end = time.monotonic()
@@ -224,8 +232,14 @@ async def main_async(args):
         print(f"{RED}No endpoint set. Use --endpoint URL{RESET}")
         return
 
-    concurrency_levels = [int(x) for x in args.concurrency.split(",")]
-    num_requests = args.requests
+    try:
+        concurrency_levels = [int(x) for x in args.concurrency.split(",")]
+        if any(c < 1 for c in concurrency_levels):
+            raise ValueError("concurrency must be positive")
+    except ValueError as e:
+        print(f"{RED}Invalid concurrency levels: {e}{RESET}")
+        return
+    num_requests = max(1, args.requests)
 
     print(f"\n{BOLD}vLLM Load Test{RESET}")
     print(f"{DIM}Endpoint:    {endpoint}{RESET}")
@@ -250,7 +264,7 @@ async def main_async(args):
                 else:
                     print(f"{RED}HTTP {resp.status}{RESET}")
                     return
-    except Exception as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
         print(f"{RED}Failed: {e}{RESET}")
         return
 
