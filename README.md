@@ -22,7 +22,11 @@ Built for **linux/amd64** — build via GitHub Actions or on an OCI x86 instance
 │   ├── parse_logs.py                  # vLLM log parser (outputs CSV)
 │   └── requirements.txt               # Python dependencies (openai, aiohttp)
 ├── ui/
-│   └── index.html                     # Browser-based chat UI for testing
+│   ├── shared/
+│   │   ├── styles.css                 # Shared CSS (theming via CSS variables)
+│   │   └── chat.js                    # Shared chat engine (config-driven)
+│   ├── index.html                     # Developer chat UI (settings bar)
+│   └── college-advisor.html           # College admissions advisor chat
 ├── scripts/
 │   ├── start.sh                       # Baked image entrypoint (vLLM serve)
 │   ├── pre_start.sh                   # RunPod pre-start hook
@@ -250,6 +254,26 @@ open ui/index.html
 ```
 
 Enter your RunPod proxy URL and API key. Features: streaming responses, multi-turn conversation, configurable temperature/max tokens, settings persisted in localStorage.
+
+### Creating a New Chat UI
+
+All UIs share `ui/shared/styles.css` and `ui/shared/chat.js`. To create a new purpose-built chat, create an HTML file with a `CHAT_CONFIG` object:
+
+```javascript
+window.CHAT_CONFIG = {
+  id: 'my-advisor',              // unique ID for localStorage
+  mode: 'simple',                // 'simple' (setup overlay) or 'developer' (settings bar)
+  systemPrompt: '...',           // system prompt defining the persona
+  welcomeMessage: 'Hello!',     // initial greeting
+  starters: ['Question 1', ...], // conversation starter buttons
+  placeholder: 'Ask a question', // textarea placeholder
+  maxTokens: 1500,               // default max tokens
+  temperature: 0.6,              // default temperature
+  stripThinking: true,           // strip Qwen3 <think> tags
+};
+```
+
+Theming is via CSS variables (`--accent`, `--bg-primary`, etc.) — override in a `<style>` block for custom colors.
 
 ## Customization
 

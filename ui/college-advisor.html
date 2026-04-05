@@ -4,96 +4,27 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>College Advisor</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; }
-
-  /* Header */
-  .header { padding: 16px 24px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; }
-  .header h1 { font-size: 20px; color: #f8fafc; }
-  .header h1 span { color: #60a5fa; }
-  .header .subtitle { font-size: 13px; color: #94a3b8; margin-top: 2px; }
-  #status { font-size: 12px; padding: 4px 10px; border-radius: 12px; }
-  #status.connected { background: #0a3d2a; color: #4ade80; }
-  #status.disconnected { background: #3d0a0a; color: #f87171; }
-  #status.checking { background: #3d3a0a; color: #fbbf24; }
-
-  /* Setup overlay */
-  .setup-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
-  .setup-overlay.hidden { display: none; }
-  .setup-box { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 32px; max-width: 480px; width: 90%; }
-  .setup-box h2 { color: #f8fafc; margin-bottom: 8px; }
-  .setup-box p { color: #94a3b8; font-size: 14px; margin-bottom: 20px; }
-  .setup-box label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 4px; }
-  .setup-box input { width: 100%; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 10px 14px; border-radius: 8px; font-size: 14px; margin-bottom: 16px; }
-  .setup-box input:focus { outline: none; border-color: #60a5fa; }
-  .setup-box button { background: #3b82f6; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600; width: 100%; }
-  .setup-box button:hover { background: #2563eb; }
-
-  /* Chat area */
-  .chat { flex: 1; overflow-y: auto; padding: 16px 24px; display: flex; flex-direction: column; gap: 12px; }
-  .message { max-width: 80%; padding: 14px 18px; border-radius: 16px; line-height: 1.6; font-size: 14px; white-space: pre-wrap; word-wrap: break-word; }
-  .message.user { align-self: flex-end; background: #1d4ed8; border-bottom-right-radius: 4px; }
-  .message.assistant { align-self: flex-start; background: #1e293b; border: 1px solid #334155; border-bottom-left-radius: 4px; }
-  .message.assistant strong { color: #60a5fa; }
-  .message.assistant em { color: #a5b4fc; }
-  .message.error { align-self: center; background: #3d0a0a; color: #f87171; font-size: 13px; }
-  .message .meta { font-size: 11px; color: #64748b; margin-top: 8px; }
-  .thinking-indicator { color: #64748b; font-style: italic; }
-  @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
-  .thinking-indicator { animation: pulse 1.5s ease-in-out infinite; }
-
-  /* Starters */
-  .starters { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 24px; justify-content: center; }
-  .starters.hidden { display: none; }
-  .starter-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 10px 16px; border-radius: 12px; font-size: 13px; cursor: pointer; transition: all 0.2s; }
-  .starter-btn:hover { border-color: #60a5fa; color: #e2e8f0; background: #1e3a5f; }
-
-  /* Input area */
-  .input-area { padding: 12px 24px 16px; background: #1e293b; border-top: 1px solid #334155; display: flex; gap: 8px; }
-  #prompt { flex: 1; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 12px 16px; border-radius: 12px; font-size: 14px; font-family: inherit; resize: none; min-height: 48px; max-height: 200px; }
-  #prompt:focus { outline: none; border-color: #60a5fa; }
-  #send { background: #3b82f6; color: white; border: none; padding: 12px 20px; border-radius: 12px; font-size: 14px; cursor: pointer; font-weight: 600; }
-  #send:hover { background: #2563eb; }
-  #send:disabled { background: #334155; cursor: not-allowed; }
-  #clear { background: #334155; color: #94a3b8; border: none; padding: 12px 14px; border-radius: 12px; font-size: 14px; cursor: pointer; }
-  #clear:hover { background: #475569; color: #e2e8f0; }
-</style>
+<link rel="stylesheet" href="shared/styles.css">
 </head>
 <body>
 
 <div class="header">
   <div>
-    <h1><span>College</span> Advisor</h1>
+    <h1><span class="accent">College</span> Advisor</h1>
     <div class="subtitle">Your personal college admissions guide</div>
   </div>
   <span id="status" class="disconnected">Not connected</span>
 </div>
 
-<div class="chat" id="chat">
-  <div class="message assistant">Hi! I'm your college admissions advisor. I'm here to help you navigate every step of the college process — from building your college list to crafting standout applications.
-
-What would you like to work on today?</div>
-</div>
-
-<div class="starters" id="starters">
-  <button class="starter-btn" onclick="sendStarter(this)">Help me build my college list</button>
-  <button class="starter-btn" onclick="sendStarter(this)">What should I look for in a college?</button>
-  <button class="starter-btn" onclick="sendStarter(this)">How do I show demonstrated interest?</button>
-  <button class="starter-btn" onclick="sendStarter(this)">Help me plan my application timeline</button>
-  <button class="starter-btn" onclick="sendStarter(this)">Review my Common App essay idea</button>
-  <button class="starter-btn" onclick="sendStarter(this)">What extracurriculars matter most?</button>
-  <button class="starter-btn" onclick="sendStarter(this)">Explain Early Decision vs Early Action</button>
-  <button class="starter-btn" onclick="sendStarter(this)">How do I ask for strong recommendation letters?</button>
-</div>
+<div class="chat" id="chat"></div>
+<div class="starters" id="starters"></div>
 
 <div class="input-area">
-  <textarea id="prompt" rows="1" placeholder="Ask me anything about college admissions..."></textarea>
+  <textarea id="prompt" rows="1"></textarea>
   <button id="clear">Clear</button>
   <button id="send">Send</button>
 </div>
 
-<!-- Setup overlay -->
 <div class="setup-overlay" id="setup-overlay">
   <div class="setup-box">
     <h2>Welcome!</h2>
@@ -107,7 +38,25 @@ What would you like to work on today?</div>
 </div>
 
 <script>
-const SYSTEM_PROMPT = `You are an expert college admissions counselor with 20+ years of experience helping students gain admission to top universities. You are advising a 17-year-old high school junior who is beginning the college search and application process.
+window.CHAT_CONFIG = {
+  id: 'college-advisor',
+  mode: 'simple',
+  maxTokens: 1500,
+  temperature: 0.6,
+  stripThinking: true,
+  placeholder: 'Ask me anything about college admissions...',
+  welcomeMessage: `Hi! I'm your college admissions advisor. I'm here to help you navigate every step of the college process — from building your college list to crafting standout applications.\n\nWhat would you like to work on today?`,
+  starters: [
+    'Help me build my college list',
+    'What should I look for in a college?',
+    'How do I show demonstrated interest?',
+    'Help me plan my application timeline',
+    'Review my Common App essay idea',
+    'What extracurriculars matter most?',
+    'Explain Early Decision vs Early Action',
+    'How do I ask for strong recommendation letters?',
+  ],
+  systemPrompt: `You are an expert college admissions counselor with 20+ years of experience helping students gain admission to top universities. You are advising a 17-year-old high school junior who is beginning the college search and application process.
 
 Your role and expertise:
 - You have deep knowledge of the U.S. college admissions process including selective, moderately selective, and open-admission institutions
@@ -178,231 +127,10 @@ Important rules:
 - Never write essays for the student — guide and suggest, but the writing must be theirs
 - Always consider the whole student, not just grades and test scores
 - Be sensitive to financial constraints — not every family can afford full-price tuition
-- Encourage the student to trust their instincts about fit while being strategic`;
-
-const chatEl = document.getElementById('chat');
-const promptEl = document.getElementById('prompt');
-const sendBtn = document.getElementById('send');
-const clearBtn = document.getElementById('clear');
-const startersEl = document.getElementById('starters');
-const statusEl = document.getElementById('status');
-const setupOverlay = document.getElementById('setup-overlay');
-
-let messages = [{ role: 'system', content: SYSTEM_PROMPT }];
-let generating = false;
-let endpoint = localStorage.getItem('college-endpoint') || '';
-let apikey = localStorage.getItem('college-apikey') || '';
-
-// Show setup if no config
-if (endpoint && apikey) {
-  setupOverlay.classList.add('hidden');
-  checkConnection();
-} else {
-  document.getElementById('setup-endpoint').value = endpoint;
-  document.getElementById('setup-key').value = apikey;
-}
-
-function saveSetup() {
-  endpoint = document.getElementById('setup-endpoint').value.replace(/\/+$/, '');
-  apikey = document.getElementById('setup-key').value;
-  if (!endpoint || !apikey) return;
-  localStorage.setItem('college-endpoint', endpoint);
-  localStorage.setItem('college-apikey', apikey);
-  setupOverlay.classList.add('hidden');
-  checkConnection();
-}
-
-async function checkConnection() {
-  if (!endpoint) { setStatus('disconnected', 'Not connected'); return; }
-  setStatus('checking', 'Connecting...');
-  try {
-    const res = await fetch(endpoint + '/v1/models', {
-      headers: { 'Authorization': 'Bearer ' + apikey }
-    });
-    if (res.ok) {
-      setStatus('connected', 'Connected');
-    } else {
-      setStatus('disconnected', 'HTTP ' + res.status);
-    }
-  } catch (e) {
-    setStatus('disconnected', 'Unreachable');
-  }
-}
-
-function setStatus(cls, text) {
-  statusEl.className = cls;
-  statusEl.textContent = text;
-}
-
-function addMessage(role, content) {
-  const div = document.createElement('div');
-  div.className = 'message ' + role;
-  div.textContent = content;
-  chatEl.appendChild(div);
-  chatEl.scrollTop = chatEl.scrollHeight;
-  return div;
-}
-
-function sendStarter(btn) {
-  promptEl.value = btn.textContent;
-  send();
-}
-
-async function send() {
-  const text = promptEl.value.trim();
-  if (!text || generating) return;
-
-  if (!endpoint) {
-    setupOverlay.classList.remove('hidden');
-    return;
-  }
-
-  // Hide starters after first message
-  startersEl.classList.add('hidden');
-
-  messages.push({ role: 'user', content: text });
-  addMessage('user', text);
-  promptEl.value = '';
-  promptEl.style.height = 'auto';
-
-  generating = true;
-  sendBtn.disabled = true;
-
-  const assistantDiv = addMessage('assistant', '');
-  // Show a thinking indicator while model reasons
-  assistantDiv.innerHTML = '<span class="thinking-indicator">Thinking...</span>';
-  let fullContent = '';
-  let displayContent = '';
-  let inThinking = false;
-  const startTime = Date.now();
-
-  try {
-    const res = await fetch(endpoint + '/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apikey
-      },
-      body: JSON.stringify({
-        model: '/models/weights',
-        messages: messages,
-        max_tokens: 2500,
-        temperature: 0.6,
-        stream: true,
-        chat_template_kwargs: { "enable_thinking": false }
-      })
-    });
-
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error('HTTP ' + res.status + ': ' + err);
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let thinkingCleared = false;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const data = line.slice(6);
-        if (data === '[DONE]') break;
-        try {
-          const json = JSON.parse(data);
-          const delta = json.choices?.[0]?.delta?.content;
-          if (delta) {
-            fullContent += delta;
-
-            // Strip <think>...</think> blocks from display
-            // Track if we're inside a thinking block
-            let i = 0;
-            while (i < delta.length) {
-              if (!inThinking) {
-                const thinkStart = delta.indexOf('<think>', i);
-                if (thinkStart !== -1) {
-                  displayContent += delta.slice(i, thinkStart);
-                  inThinking = true;
-                  i = thinkStart + 7;
-                } else {
-                  displayContent += delta.slice(i);
-                  i = delta.length;
-                }
-              } else {
-                const thinkEnd = delta.indexOf('</think>', i);
-                if (thinkEnd !== -1) {
-                  inThinking = false;
-                  i = thinkEnd + 8;
-                } else {
-                  i = delta.length;
-                }
-              }
-            }
-
-            // Only show non-thinking content
-            const trimmed = displayContent.trim();
-            if (trimmed && !thinkingCleared) {
-              assistantDiv.textContent = '';
-              thinkingCleared = true;
-            }
-            if (thinkingCleared) {
-              assistantDiv.textContent = trimmed;
-              chatEl.scrollTop = chatEl.scrollHeight;
-            }
-          }
-        } catch (e) {}
-      }
-    }
-
-    // Final cleanup — remove any remaining think tags
-    const cleanContent = displayContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-    assistantDiv.textContent = cleanContent;
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.textContent = elapsed + 's';
-    assistantDiv.appendChild(meta);
-
-    messages.push({ role: 'assistant', content: cleanContent });
-
-  } catch (e) {
-    assistantDiv.className = 'message error';
-    assistantDiv.textContent = e.message;
-    messages.pop();
-  }
-
-  generating = false;
-  sendBtn.disabled = false;
-  promptEl.focus();
-}
-
-sendBtn.addEventListener('click', send);
-promptEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    send();
-  }
-});
-
-promptEl.addEventListener('input', () => {
-  promptEl.style.height = 'auto';
-  promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px';
-});
-
-clearBtn.addEventListener('click', () => {
-  messages = [{ role: 'system', content: SYSTEM_PROMPT }];
-  chatEl.innerHTML = '<div class="message assistant">Hi! I\'m your college admissions advisor. I\'m here to help you navigate every step of the college process — from building your college list to crafting standout applications.\n\nWhat would you like to work on today?</div>';
-  startersEl.classList.remove('hidden');
-});
+- Encourage the student to trust their instincts about fit while being strategic`,
+};
 </script>
+<script src="shared/chat.js"></script>
 
 </body>
 </html>
