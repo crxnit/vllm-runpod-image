@@ -16,6 +16,9 @@ Built for **linux/amd64** — build via GitHub Actions or on an OCI x86 instance
 ```
 ├── Dockerfile                          # Standard image (downloads model at boot)
 ├── Dockerfile.baked                    # Single-stage image (model weights baked in)
+├── cli/
+│   ├── chat.py                        # Terminal chat interface
+│   └── requirements.txt               # Python dependencies (openai)
 ├── ui/
 │   └── index.html                     # Browser-based chat UI for testing
 ├── scripts/
@@ -132,20 +135,26 @@ curl -H "Authorization: Bearer YOUR_API_KEY" \
   https://<your-runpod-url>:8000/v1/chat/completions
 ```
 
-## Test UI
+## Test Interfaces
 
-A browser-based chat interface is included for testing deployed models.
+Two interfaces are included for testing deployed models.
+
+### CLI Chat
+
+```bash
+pip install -r cli/requirements.txt
+python cli/chat.py --endpoint https://your-pod-id-8000.proxy.runpod.net --key YOUR_API_KEY
+```
+
+Features: streaming responses, multi-turn conversation, slash commands (`/help`, `/clear`, `/system`, `/temp`, `/max`, `/model`, `/history`), Ctrl+C to cancel. Config is saved to `~/.config/vllm-chat/config.json` so you only set it once.
+
+### Web UI
 
 ```bash
 open ui/index.html
 ```
 
-Enter your RunPod proxy URL (e.g. `https://your-pod-id-8000.proxy.runpod.net`) and API key. Features:
-
-- Streaming responses
-- Multi-turn conversation history
-- Configurable temperature and max tokens
-- Settings persisted in localStorage
+Enter your RunPod proxy URL and API key. Features: streaming responses, multi-turn conversation, configurable temperature/max tokens, settings persisted in localStorage.
 
 ## Customization
 

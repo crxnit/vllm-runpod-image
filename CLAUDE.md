@@ -57,9 +57,10 @@ All three workflows are **manual dispatch only** (`workflow_dispatch`):
 - `VLLM_WORKER_MULTIPROC_METHOD=spawn` is set in both Dockerfiles for multi-GPU compatibility.
 - Base image is pinned to `vllm/vllm-openai:v0.11.2` (CUDA 12.8). Do not use `latest` — it requires CUDA 12.9 which RunPod drivers don't support.
 
-## Test UI
+## Test Interfaces
 
-`ui/index.html` is a single-file browser-based chat UI for testing models. Open it directly (`open ui/index.html`), enter the RunPod proxy URL and API key. Supports streaming responses, multi-turn conversation, configurable temperature/max tokens. Settings persist in localStorage.
+- **CLI** — `cli/chat.py` is a terminal chat interface (requires `openai` pip package). Config saved to `~/.config/vllm-chat/config.json`. Run: `python cli/chat.py --endpoint URL --key KEY`. Supports slash commands (`/help`, `/clear`, `/system`, `/temp`, `/max`, `/model`, `/history`), streaming, multi-turn conversation, and Ctrl+C to cancel.
+- **Web UI** — `ui/index.html` is a single-file browser-based chat UI. Open directly (`open ui/index.html`), enter the RunPod proxy URL and API key. Supports streaming responses, multi-turn conversation, configurable temperature/max tokens. Settings persist in localStorage.
 
 ## RunPod Deployment
 
