@@ -226,21 +226,21 @@
           <div class="settings">
             <div class="field endpoint">
               <label>Endpoint URL</label>
-              <input type="text" id="endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
+              <input type="text" class="js-endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
             </div>
             <div class="field apikey">
               <label>API Key</label>
-              <input type="password" id="apikey" placeholder="your-api-key">
+              <input type="password" class="js-apikey" placeholder="your-api-key">
             </div>
             <div class="field">
               <label>Max Tokens</label>
-              <input type="number" id="max-tokens" value="${defaultMaxTokens}" min="1" max="16384" style="width:80px">
+              <input type="number" class="js-max-tokens" value="${defaultMaxTokens}" min="1" max="16384" style="width:80px">
             </div>
             <div class="field">
               <label>Temperature</label>
-              <input type="number" id="temperature" value="${defaultTemperature}" min="0" max="2" step="0.1" style="width:70px">
+              <input type="number" class="js-temperature" value="${defaultTemperature}" min="0" max="2" step="0.1" style="width:70px">
             </div>
-            <span id="status" class="disconnected">Not connected</span>
+            <span class="status-badge disconnected">Not connected</span>
           </div>`;
       } else {
         const titleHtml = config.titleAccent
@@ -254,47 +254,48 @@
               <h1>${titleHtml}</h1>
               ${subtitleHtml}
             </div>
-            <span id="status" class="disconnected">Not connected</span>
+            <span class="status-badge disconnected">Not connected</span>
           </div>`;
       }
 
       app.innerHTML += `
-        <div class="chat" id="chat"></div>
-        <div class="starters" id="starters"></div>
+        <div class="chat"></div>
+        <div class="starters"></div>
         <div class="input-area">
-          <textarea id="prompt" rows="1" placeholder="${config.placeholder || 'Type a message...'}"></textarea>
-          <button id="clear">Clear</button>
-          <button id="send">Send</button>
+          <textarea class="chat-prompt" rows="1" placeholder="${config.placeholder || 'Type a message...'}"></textarea>
+          <button class="btn-clear">Clear</button>
+          <button class="btn-send">Send</button>
         </div>`;
 
       if (mode === 'simple') {
         app.innerHTML += `
-          <div class="setup-overlay" id="setup-overlay">
+          <div class="setup-overlay">
             <div class="setup-box">
               <h2>Welcome!</h2>
               <p>Enter your connection details to get started. You only need to do this once.</p>
               <label>Endpoint URL</label>
-              <input type="text" id="setup-endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
+              <input type="text" class="js-setup-endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
               <label>API Key</label>
-              <input type="password" id="setup-key" placeholder="your-api-key">
-              <button id="setup-connect-btn">Connect</button>
+              <input type="password" class="js-setup-key" placeholder="your-api-key">
+              <button class="js-setup-connect">Connect</button>
             </div>
           </div>`;
       }
     },
 
     bind() {
-      this.chat = document.getElementById('chat');
-      this.prompt = document.getElementById('prompt');
-      this.send = document.getElementById('send');
-      this.clear = document.getElementById('clear');
-      this.status = document.getElementById('status');
-      this.starters = document.getElementById('starters');
-      this.overlay = document.getElementById('setup-overlay');
-      this.endpoint = document.getElementById('endpoint');
-      this.apikey = document.getElementById('apikey');
-      this.maxTokens = document.getElementById('max-tokens');
-      this.temperature = document.getElementById('temperature');
+      const q = (sel) => document.querySelector(sel);
+      this.chat = q('.chat');
+      this.prompt = q('.chat-prompt');
+      this.send = q('.btn-send');
+      this.clear = q('.btn-clear');
+      this.status = q('.status-badge');
+      this.starters = q('.starters');
+      this.overlay = q('.setup-overlay');
+      this.endpoint = q('.js-endpoint');
+      this.apikey = q('.js-apikey');
+      this.maxTokens = q('.js-max-tokens');
+      this.temperature = q('.js-temperature');
     },
 
     setStatus(cls, text) {
@@ -461,11 +462,11 @@
       connection.check((cls, text) => dom.setStatus(cls, text));
     }
 
-    const connectBtn = document.getElementById('setup-connect-btn');
+    const connectBtn = document.querySelector('.js-setup-connect');
     if (connectBtn) {
       connectBtn.addEventListener('click', () => {
-        const ep = document.getElementById('setup-endpoint');
-        const key = document.getElementById('setup-key');
+        const ep = document.querySelector('.js-setup-endpoint');
+        const key = document.querySelector('.js-setup-key');
         if (!ep || !key) return;
         connection.endpoint = ep.value.replace(/\/+$/, '');
         connection.apikey = key.value;

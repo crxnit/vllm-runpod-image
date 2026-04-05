@@ -25,10 +25,10 @@ body {
 .header .subtitle { font-size: 13px; color: var(--text-muted, #94a3b8); margin-top: 2px; }
 
 /* Connection status */
-#status { font-size: 12px; padding: 4px 10px; border-radius: 12px; }
-#status.connected { background: #0a3d2a; color: #4ade80; }
-#status.disconnected { background: #3d0a0a; color: #f87171; }
-#status.checking { background: #3d3a0a; color: #fbbf24; }
+.status-badge { font-size: 12px; padding: 4px 10px; border-radius: 12px; }
+.status-badge.connected { background: #0a3d2a; color: #4ade80; }
+.status-badge.disconnected { background: #3d0a0a; color: #f87171; }
+.status-badge.checking { background: #3d3a0a; color: #fbbf24; }
 
 /* Settings bar (developer mode) */
 .settings {
@@ -174,7 +174,7 @@ body {
   display: flex; gap: 8px;
 }
 
-#prompt {
+.chat-prompt {
   flex: 1;
   background: var(--bg-primary, #0f172a);
   border: 1px solid var(--border, #334155);
@@ -183,21 +183,21 @@ body {
   font-size: 14px; font-family: inherit;
   resize: none; min-height: 48px; max-height: 200px;
 }
-#prompt:focus { outline: none; border-color: var(--accent, #60a5fa); }
+.chat-prompt:focus { outline: none; border-color: var(--accent, #60a5fa); }
 
-#send {
+.btn-send {
   background: var(--accent, #3b82f6);
   color: white; border: none;
   padding: 12px 20px; border-radius: 12px;
   font-size: 14px; cursor: pointer; font-weight: 600;
 }
-#send:hover { filter: brightness(0.9); }
-#send:disabled { background: var(--border, #334155); cursor: not-allowed; }
+.btn-send:hover { filter: brightness(0.9); }
+.btn-send:disabled { background: var(--border, #334155); cursor: not-allowed; }
 
-#clear {
+.btn-clear {
   background: var(--border, #334155);
   color: var(--text-muted, #94a3b8);
   border: none; padding: 12px 14px;
   border-radius: 12px; font-size: 14px; cursor: pointer;
 }
-#clear:hover { filter: brightness(1.3); color: var(--text-primary, #e2e8f0); }
+.btn-clear:hover { filter: brightness(1.3); color: var(--text-primary, #e2e8f0); }
