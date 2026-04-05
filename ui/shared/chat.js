@@ -65,12 +65,18 @@
     localStorage.setItem(storageKey('apikey'), apikey);
   }
 
+  function apiBase() {
+    // If endpoint already ends with /v1, use as-is; otherwise append /v1
+    if (endpoint.endsWith('/v1')) return endpoint;
+    return endpoint + '/v1';
+  }
+
   // --- Connection ---
   async function checkConnection() {
     if (!endpoint) { setStatus('disconnected', 'Not connected'); return; }
     setStatus('checking', 'Connecting...');
     try {
-      const res = await fetch(endpoint + '/v1/models', {
+      const res = await fetch(apiBase() + '/models', {
         headers: { 'Authorization': 'Bearer ' + apikey }
       });
       if (res.ok) {
@@ -165,7 +171,7 @@
         body.chat_template_kwargs = { enable_thinking: false };
       }
 
-      const res = await fetch(endpoint + '/v1/chat/completions', {
+      const res = await fetch(apiBase() + '/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
