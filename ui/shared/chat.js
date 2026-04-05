@@ -44,6 +44,33 @@
   const responseProcessors = config.responseProcessors || [];
 
   // =========================================================================
+  // Utilities
+  // =========================================================================
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function escapeAttr(str) {
+    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function clampNumber(val, min, max, fallback) {
+    const n = Number(val);
+    if (isNaN(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function safeSaveStorage(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn('[chat.js] localStorage write failed:', e.message);
+    }
+  }
+
+  // =========================================================================
   // Storage — reads/writes connection and settings to localStorage
   // =========================================================================
   const storage = {
@@ -52,10 +79,10 @@
     getApiKey()      { return localStorage.getItem(this._key('apikey')) || ''; },
     getMaxTokens()   { return localStorage.getItem(this._key('max-tokens')) || String(defaultMaxTokens); },
     getTemperature() { return localStorage.getItem(this._key('temperature')) || String(defaultTemperature); },
-    saveEndpoint(v)    { localStorage.setItem(this._key('endpoint'), v); },
-    saveApiKey(v)      { localStorage.setItem(this._key('apikey'), v); },
-    saveMaxTokens(v)   { localStorage.setItem(this._key('max-tokens'), v); },
-    saveTemperature(v) { localStorage.setItem(this._key('temperature'), v); },
+    saveEndpoint(v)    { safeSaveStorage(this._key('endpoint'), v); },
+    saveApiKey(v)      { safeSaveStorage(this._key('apikey'), v); },
+    saveMaxTokens(v)   { safeSaveStorage(this._key('max-tokens'), v); },
+    saveTemperature(v) { safeSaveStorage(this._key('temperature'), v); },
   };
 
   // =========================================================================
@@ -170,7 +197,7 @@
         return display;
       },
 
-      finalize(raw) {
+      finalize() {
         return display.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
       },
     };
@@ -179,7 +206,11 @@
   // =========================================================================
   // API Client — sends chat completion requests
   // =========================================================================
+  let currentAbortController = null;
+
   async function sendChatRequest(messages, maxTokens, temperature) {
+    currentAbortController = new AbortController();
+
     const body = {
       model: connection.modelName(),
       messages: messages,
@@ -198,7 +229,8 @@
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + connection.apikey
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: currentAbortController.signal,
     });
 
     if (!res.ok) {
@@ -207,6 +239,13 @@
     }
 
     return res.body.getReader();
+  }
+
+  function cancelRequest() {
+    if (currentAbortController) {
+      currentAbortController.abort();
+      currentAbortController = null;
+    }
   }
 
   // =========================================================================
@@ -244,10 +283,10 @@
           </div>`;
       } else {
         const titleHtml = config.titleAccent
-          ? `<span class="accent">${config.titleAccent}</span> ${config.title || ''}`
-          : (config.title || 'Chat');
+          ? `<span class="accent">${escapeHtml(config.titleAccent)}</span> ${escapeHtml(config.title || '')}`
+          : escapeHtml(config.title || 'Chat');
         const subtitleHtml = config.subtitle
-          ? `<div class="subtitle">${config.subtitle}</div>` : '';
+          ? `<div class="subtitle">${escapeHtml(config.subtitle)}</div>` : '';
         app.innerHTML += `
           <div class="header">
             <div>
@@ -262,7 +301,7 @@
         <div class="chat"></div>
         <div class="starters"></div>
         <div class="input-area">
-          <textarea class="chat-prompt" rows="1" placeholder="${config.placeholder || 'Type a message...'}"></textarea>
+          <textarea class="chat-prompt" rows="1" placeholder="${escapeAttr(config.placeholder || 'Type a message...')}"></textarea>
           <button class="btn-clear">Clear</button>
           <button class="btn-send">Send</button>
         </div>`;
@@ -344,7 +383,11 @@
 
   async function send() {
     const text = dom.prompt.value.trim();
-    if (!text || generating) return;
+    if (!text) return;
+    if (generating) {
+      cancelRequest();
+      return;
+    }
 
     if (!connection.endpoint) {
       if (dom.overlay) dom.overlay.classList.remove('hidden');
@@ -353,6 +396,7 @@
 
     if (dom.starters) dom.starters.classList.add('hidden');
 
+    const userMsgIndex = messages.length;
     messages.push({ role: 'user', content: text });
     dom.addMessage('user', text);
     dom.prompt.value = '';
@@ -367,8 +411,14 @@
     }
 
     const startTime = Date.now();
-    const maxTokens = dom.maxTokens ? parseInt(dom.maxTokens.value) : defaultMaxTokens;
-    const temp = dom.temperature ? parseFloat(dom.temperature.value) : defaultTemperature;
+    const maxTokens = clampNumber(
+      dom.maxTokens ? dom.maxTokens.value : defaultMaxTokens,
+      1, 16384, defaultMaxTokens
+    );
+    const temp = clampNumber(
+      dom.temperature ? dom.temperature.value : defaultTemperature,
+      0, 2, defaultTemperature
+    );
 
     try {
       const reader = await sendChatRequest(messages, maxTokens, temp);
@@ -396,7 +446,7 @@
         }
       }
 
-      let cleanContent = filter ? filter.finalize(fullContent) : fullContent;
+      let cleanContent = filter ? filter.finalize() : fullContent;
       cleanContent = applyProcessors(cleanContent);
       assistantDiv.textContent = cleanContent;
 
@@ -409,11 +459,20 @@
       messages.push({ role: 'assistant', content: cleanContent });
 
     } catch (e) {
-      assistantDiv.className = 'message error';
-      assistantDiv.textContent = e.message;
-      messages.pop();
+      if (e.name === 'AbortError') {
+        assistantDiv.className = 'message meta';
+        assistantDiv.textContent = '(cancelled)';
+      } else {
+        assistantDiv.className = 'message error';
+        assistantDiv.textContent = e.message;
+      }
+      // Remove the user message we added at the known index
+      if (messages.length > userMsgIndex && messages[userMsgIndex]?.role === 'user') {
+        messages.splice(userMsgIndex, 1);
+      }
     }
 
+    currentAbortController = null;
     generating = false;
     dom.send.disabled = false;
     dom.prompt.focus();
@@ -426,7 +485,14 @@
     if (dom.endpoint) {
       dom.endpoint.value = connection.endpoint;
       dom.endpoint.addEventListener('change', () => {
-        connection.endpoint = dom.endpoint.value.replace(/\/+$/, '');
+        const val = dom.endpoint.value.replace(/\/+$/, '');
+        if (val) {
+          try { new URL(val); } catch (e) {
+            dom.setStatus('disconnected', 'Invalid URL');
+            return;
+          }
+        }
+        connection.endpoint = val;
         connection.save();
         connection.check((cls, text) => dom.setStatus(cls, text));
       });
@@ -468,9 +534,17 @@
         const ep = document.querySelector('.js-setup-endpoint');
         const key = document.querySelector('.js-setup-key');
         if (!ep || !key) return;
-        connection.endpoint = ep.value.replace(/\/+$/, '');
+        const epVal = ep.value.replace(/\/+$/, '');
+        if (!epVal || !key.value) return;
+        try {
+          new URL(epVal);
+        } catch (e) {
+          ep.style.borderColor = '#f87171';
+          return;
+        }
+        ep.style.borderColor = '';
+        connection.endpoint = epVal;
         connection.apikey = key.value;
-        if (!connection.endpoint || !connection.apikey) return;
         connection.save();
         if (dom.overlay) dom.overlay.classList.add('hidden');
         connection.check((cls, text) => dom.setStatus(cls, text));
@@ -496,7 +570,7 @@
 
     if (dom.starters && config.starters && config.starters.length > 0) {
       dom.starters.innerHTML = config.starters.map(
-        s => `<button class="starter-btn">${s}</button>`
+        s => `<button class="starter-btn">${escapeHtml(s)}</button>`
       ).join('');
       dom.starters.addEventListener('click', (e) => {
         if (e.target.classList.contains('starter-btn')) {
