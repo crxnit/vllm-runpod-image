@@ -55,7 +55,7 @@ All three workflows are **manual dispatch only** (`workflow_dispatch`):
 - The standard Dockerfile lets vLLM download the model by name at runtime via `CMD`.
 - Model is served on port 8000. `--max-model-len` defaults to 16384 but is configurable via `MAX_MODEL_LEN` env var in the RunPod template (e.g. set to 4096 for 24GB GPUs with 32B models). The baked Dockerfile uses a `QUANTIZATION` build arg/env var (default `awq`) to conditionally pass `--quantization` — set to empty for non-quantized models.
 - `VLLM_WORKER_MULTIPROC_METHOD=spawn` is set in both Dockerfiles for multi-GPU compatibility.
-- Base image is pinned to `vllm/vllm-openai:v0.11.2` (CUDA 12.8). Do not use `latest` — it requires CUDA 12.9 which RunPod drivers don't support.
+- Base image is pinned to `vllm/vllm-openai:v0.11.2` (CUDA 12.8). Do not use `latest` — it requires CUDA 12.9 which RunPod drivers don't support. Consumer GPUs (RTX 3090, etc.) on RunPod often have older drivers incompatible with CUDA 12.8 — use datacenter GPUs (A5000, A6000, A100) instead.
 
 ## Test Interfaces
 
@@ -68,6 +68,7 @@ All three workflows are **manual dispatch only** (`workflow_dispatch`):
 
 - Create a RunPod template via `runpodctl template create` with the GHCR image, ports `8000/http,22/tcp`, and `VLLM_API_KEY` env var. Port 22 enables SSH access.
 - Recommended for interactive chat: 7B AWQ on RTX A5000 ($0.27/hr) — best speed/cost balance. 3B/14B AWQ also fit on A4000/A5000. 32B AWQ needs `MAX_MODEL_LEN=4096` on 24GB GPUs. 70B AWQ needs A100 80GB with `MAX_MODEL_LEN=8192`. All images default `MAX_NUM_SEQS=64` to prevent warmup OOM.
+- **Avoid consumer GPUs** (RTX 3090, 4090, etc.) — their RunPod hosts often have older NVIDIA drivers that are incompatible with CUDA 12.8, causing `forward compatibility was attempted on non supported HW` errors at boot. Stick to datacenter GPUs (A5000+).
 - Container disk: 20GB for 3B/7B models, 30GB for 14B, 40GB for 32B, 80GB for 70B. No volume disk needed (weights are baked in).
 - Pods without a network volume can only be terminated, not stopped.
 - Port configuration is set at pod creation time — cannot be changed on a running pod.
