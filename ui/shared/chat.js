@@ -2,17 +2,21 @@
  * shared/chat.js — Shared chat engine for all UIs.
  *
  * Usage: define a CHAT_CONFIG object before loading this script.
+ * The script auto-generates all required DOM elements.
  *
  * CHAT_CONFIG = {
  *   id: 'college-advisor',          // unique ID for localStorage keys
  *   systemPrompt: '...',            // system prompt string
  *   welcomeMessage: '...',          // initial assistant message (optional)
  *   starters: ['...', '...'],       // conversation starter buttons (optional)
- *   placeholder: 'Ask a question',  // textarea placeholder
+ *   placeholder: 'Ask a question',  // textarea placeholder (optional)
  *   maxTokens: 1500,                // default max tokens
  *   temperature: 0.6,               // default temperature
  *   stripThinking: true,            // strip <think> tags from Qwen3 (default: true)
  *   mode: 'simple' | 'developer',  // 'simple' = setup overlay, 'developer' = settings bar
+ *   title: 'Chat',                  // header title (optional, simple mode only)
+ *   titleAccent: 'College',         // accented portion of title (optional)
+ *   subtitle: '...',                // subtitle text (optional)
  * };
  */
 
@@ -24,20 +28,82 @@
   const defaultMaxTokens = config.maxTokens || 1500;
   const defaultTemperature = config.temperature || 0.7;
 
-  // DOM elements
-  const chatEl = document.getElementById('chat');
-  const promptEl = document.getElementById('prompt');
-  const sendBtn = document.getElementById('send');
-  const clearBtn = document.getElementById('clear');
-  const statusEl = document.getElementById('status');
-  const startersEl = document.getElementById('starters');
-  const setupOverlay = document.getElementById('setup-overlay');
+  // --- DOM Generation ---
+  function buildLayout() {
+    const container = document.getElementById('chat-app');
+    if (!container) {
+      document.body.innerHTML = '<div id="chat-app"></div>';
+    }
+    const app = document.getElementById('chat-app') || document.body;
+    app.innerHTML = '';
 
-  // Developer mode elements
-  const endpointEl = document.getElementById('endpoint');
-  const apikeyEl = document.getElementById('apikey');
-  const maxTokensEl = document.getElementById('max-tokens');
-  const temperatureEl = document.getElementById('temperature');
+    if (mode === 'developer') {
+      app.innerHTML += `
+        <div class="settings">
+          <div class="field endpoint">
+            <label>Endpoint URL</label>
+            <input type="text" id="endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
+          </div>
+          <div class="field apikey">
+            <label>API Key</label>
+            <input type="password" id="apikey" placeholder="your-api-key">
+          </div>
+          <div class="field">
+            <label>Max Tokens</label>
+            <input type="number" id="max-tokens" value="${defaultMaxTokens}" min="1" max="16384" style="width:80px">
+          </div>
+          <div class="field">
+            <label>Temperature</label>
+            <input type="number" id="temperature" value="${defaultTemperature}" min="0" max="2" step="0.1" style="width:70px">
+          </div>
+          <span id="status" class="disconnected">Not connected</span>
+        </div>`;
+    } else {
+      const titleHtml = config.titleAccent
+        ? `<span class="accent">${config.titleAccent}</span> ${config.title || ''}`
+        : (config.title || 'Chat');
+      const subtitleHtml = config.subtitle
+        ? `<div class="subtitle">${config.subtitle}</div>`
+        : '';
+      app.innerHTML += `
+        <div class="header">
+          <div>
+            <h1>${titleHtml}</h1>
+            ${subtitleHtml}
+          </div>
+          <span id="status" class="disconnected">Not connected</span>
+        </div>`;
+    }
+
+    app.innerHTML += `
+      <div class="chat" id="chat"></div>
+      <div class="starters" id="starters"></div>
+      <div class="input-area">
+        <textarea id="prompt" rows="1" placeholder="${config.placeholder || 'Type a message...'}"></textarea>
+        <button id="clear">Clear</button>
+        <button id="send">Send</button>
+      </div>`;
+
+    if (mode === 'simple') {
+      app.innerHTML += `
+        <div class="setup-overlay" id="setup-overlay">
+          <div class="setup-box">
+            <h2>Welcome!</h2>
+            <p>Enter your connection details to get started. You only need to do this once.</p>
+            <label>Endpoint URL</label>
+            <input type="text" id="setup-endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
+            <label>API Key</label>
+            <input type="password" id="setup-key" placeholder="your-api-key">
+            <button id="setup-connect-btn">Connect</button>
+          </div>
+        </div>`;
+    }
+  }
+
+  // --- Storage helpers ---
+  function storageKey(suffix) {
+    return `chat-${id}-${suffix}`;
+  }
 
   // State
   let messages = [];
@@ -46,14 +112,22 @@
   let apikey = '';
   let detectedModel = null;
 
-  // Set placeholder
-  if (promptEl && config.placeholder) {
-    promptEl.placeholder = config.placeholder;
-  }
+  // DOM references (set after buildLayout)
+  let chatEl, promptEl, sendBtn, clearBtn, statusEl, startersEl, setupOverlay;
+  let endpointEl, apikeyEl, maxTokensEl, temperatureEl;
 
-  // --- Storage helpers ---
-  function storageKey(suffix) {
-    return `chat-${id}-${suffix}`;
+  function bindElements() {
+    chatEl = document.getElementById('chat');
+    promptEl = document.getElementById('prompt');
+    sendBtn = document.getElementById('send');
+    clearBtn = document.getElementById('clear');
+    statusEl = document.getElementById('status');
+    startersEl = document.getElementById('starters');
+    setupOverlay = document.getElementById('setup-overlay');
+    endpointEl = document.getElementById('endpoint');
+    apikeyEl = document.getElementById('apikey');
+    maxTokensEl = document.getElementById('max-tokens');
+    temperatureEl = document.getElementById('temperature');
   }
 
   function loadConnection() {
@@ -67,7 +141,6 @@
   }
 
   function apiBase() {
-    // If endpoint already ends with /v1, use as-is; otherwise append /v1
     if (endpoint.endsWith('/v1')) return endpoint;
     return endpoint + '/v1';
   }
@@ -132,7 +205,6 @@
       return;
     }
 
-    // Hide starters
     if (startersEl) startersEl.classList.add('hidden');
 
     messages.push({ role: 'user', content: text });
@@ -154,7 +226,6 @@
     let thinkingCleared = !stripThinking;
     const startTime = Date.now();
 
-    // Get current settings
     const maxTokens = maxTokensEl ? parseInt(maxTokensEl.value) : defaultMaxTokens;
     const temp = temperatureEl ? parseFloat(temperatureEl.value) : defaultTemperature;
 
@@ -167,7 +238,6 @@
         stream: true,
       };
 
-      // Try to disable Qwen3 thinking
       if (stripThinking) {
         body.chat_template_kwargs = { enable_thinking: false };
       }
@@ -209,7 +279,6 @@
               fullContent += delta;
 
               if (stripThinking) {
-                // Strip <think>...</think> blocks
                 let i = 0;
                 while (i < delta.length) {
                   if (!inThinking) {
@@ -247,11 +316,10 @@
                 chatEl.scrollTop = chatEl.scrollHeight;
               }
             }
-          } catch (e) {}
+          } catch (e) { /* SSE parse error — skip malformed chunk */ }
         }
       }
 
-      // Final cleanup
       const cleanContent = stripThinking
         ? displayContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
         : fullContent;
@@ -278,11 +346,11 @@
 
   // --- Initialization ---
   function init() {
+    buildLayout();
+    bindElements();
     loadConnection();
 
-    // Mode-specific setup
     if (mode === 'developer') {
-      // Developer mode: settings bar with visible controls
       if (endpointEl) {
         endpointEl.value = endpoint;
         endpointEl.addEventListener('change', () => {
@@ -313,37 +381,42 @@
       }
       if (endpoint) checkConnection();
     } else {
-      // Simple mode: setup overlay
       if (endpoint && apikey) {
         if (setupOverlay) setupOverlay.classList.add('hidden');
         checkConnection();
       }
 
-      // Wire up setup overlay save button
-      window.saveSetup = function () {
-        const ep = document.getElementById('setup-endpoint');
-        const key = document.getElementById('setup-key');
-        if (!ep || !key) return;
-        endpoint = ep.value.replace(/\/+$/, '');
-        apikey = key.value;
-        if (!endpoint || !apikey) return;
-        saveConnection();
-        if (setupOverlay) setupOverlay.classList.add('hidden');
-        checkConnection();
-      };
+      const connectBtn = document.getElementById('setup-connect-btn');
+      if (connectBtn) {
+        connectBtn.addEventListener('click', () => {
+          const ep = document.getElementById('setup-endpoint');
+          const key = document.getElementById('setup-key');
+          if (!ep || !key) return;
+          endpoint = ep.value.replace(/\/+$/, '');
+          apikey = key.value;
+          if (!endpoint || !apikey) return;
+          saveConnection();
+          if (setupOverlay) setupOverlay.classList.add('hidden');
+          checkConnection();
+        });
+      }
     }
 
-    // Initialize chat
     resetChat();
 
-    // Render starters
+    // Render starters with event delegation
     if (startersEl && config.starters && config.starters.length > 0) {
       startersEl.innerHTML = config.starters.map(
-        s => `<button class="starter-btn" onclick="window._sendStarter(this)">${s}</button>`
+        s => `<button class="starter-btn">${s}</button>`
       ).join('');
+      startersEl.addEventListener('click', (e) => {
+        if (e.target.classList.contains('starter-btn')) {
+          promptEl.value = e.target.textContent;
+          send();
+        }
+      });
     }
 
-    // Event listeners
     sendBtn.addEventListener('click', send);
     promptEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -358,13 +431,6 @@
     clearBtn.addEventListener('click', resetChat);
   }
 
-  // Global helpers for HTML onclick handlers
-  window._sendStarter = function (btn) {
-    promptEl.value = btn.textContent;
-    send();
-  };
-
-  // Boot
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

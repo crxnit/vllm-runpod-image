@@ -7,40 +7,14 @@
 <link rel="stylesheet" href="shared/styles.css">
 </head>
 <body>
-
-<div class="header">
-  <div>
-    <h1><span class="accent">College</span> Advisor</h1>
-    <div class="subtitle">Your personal college admissions guide</div>
-  </div>
-  <span id="status" class="disconnected">Not connected</span>
-</div>
-
-<div class="chat" id="chat"></div>
-<div class="starters" id="starters"></div>
-
-<div class="input-area">
-  <textarea id="prompt" rows="1"></textarea>
-  <button id="clear">Clear</button>
-  <button id="send">Send</button>
-</div>
-
-<div class="setup-overlay" id="setup-overlay">
-  <div class="setup-box">
-    <h2>Welcome!</h2>
-    <p>Enter your connection details to get started. You only need to do this once.</p>
-    <label>Endpoint URL</label>
-    <input type="text" id="setup-endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
-    <label>API Key</label>
-    <input type="password" id="setup-key" placeholder="your-api-key">
-    <button onclick="saveSetup()">Connect</button>
-  </div>
-</div>
-
+<div id="chat-app"></div>
 <script>
 window.CHAT_CONFIG = {
   id: 'college-advisor',
   mode: 'simple',
+  title: 'Advisor',
+  titleAccent: 'College',
+  subtitle: 'Your personal college admissions guide',
   maxTokens: 800,
   temperature: 0.6,
   stripThinking: true,
@@ -68,6 +42,5 @@ Rules: Never fabricate statistics or deadlines — say "verify on the school's w
 };
 </script>
 <script src="shared/chat.js"></script>
-
 </body>
 </html>
