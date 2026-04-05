@@ -76,13 +76,21 @@ Rules:
 
 def load_config():
     if CONFIG_PATH.exists():
-        return json.loads(CONFIG_PATH.read_text())
+        try:
+            return json.loads(CONFIG_PATH.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"{YELLOW}Warning: corrupt config file, starting fresh: {e}{RESET}")
+            return {}
     return {}
 
 
 def save_config(config):
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(config, indent=2))
+    try:
+        CONFIG_PATH.chmod(0o600)
+    except OSError:
+        pass
 
 
 def should_ignore(name):
@@ -130,8 +138,20 @@ def resolve_path(path_str):
     return p.resolve()
 
 
+def safe_resolve_path(path_str):
+    """Resolve path and verify it's within CWD to prevent traversal."""
+    p = resolve_path(path_str)
+    try:
+        p.relative_to(CWD)
+    except ValueError:
+        return None, f"Path escapes workspace: {path_str} (resolves to {p})"
+    return p, None
+
+
 def read_file(path_str):
-    path = resolve_path(path_str)
+    path, err = safe_resolve_path(path_str)
+    if err:
+        return None, err
     if not path.exists():
         return None, f"File not found: {path}"
     if not path.is_file():
@@ -143,22 +163,32 @@ def read_file(path_str):
         content = path.read_text(errors="replace")
         rel = path.relative_to(CWD) if path.is_relative_to(CWD) else path
         return content, str(rel)
-    except Exception as e:
+    except (OSError, PermissionError) as e:
         return None, f"Error reading {path}: {e}"
 
 
 def write_file(path_str, content):
-    path = resolve_path(path_str)
+    path, err = safe_resolve_path(path_str)
+    if err:
+        return False, err
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
         rel = path.relative_to(CWD) if path.is_relative_to(CWD) else path
         return True, str(rel)
-    except Exception as e:
+    except (OSError, PermissionError) as e:
         return False, f"Error writing {path}: {e}"
 
 
+DANGEROUS_PATTERNS = re.compile(
+    r"rm\s+-rf\s+/|mkfs|dd\s+if=|:(){ :|chmod\s+-R\s+777\s+/|>\s*/dev/sd",
+    re.IGNORECASE,
+)
+
+
 def run_shell(cmd):
+    if DANGEROUS_PATTERNS.search(cmd):
+        return f"(blocked: command matched a dangerous pattern)"
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
@@ -170,7 +200,7 @@ def run_shell(cmd):
         return output.strip() if output.strip() else "(no output)"
     except subprocess.TimeoutExpired:
         return "(command timed out after 30s)"
-    except Exception as e:
+    except OSError as e:
         return f"(error: {e})"
 
 
@@ -206,6 +236,13 @@ def process_actions(response, messages, auto_approve=False):
         filepath = match.group(1)
         content = match.group(2).strip()
 
+        # Validate path is within workspace
+        _, path_err = safe_resolve_path(filepath)
+        if path_err:
+            print(f"  {RED}Blocked: {path_err}{RESET}\n")
+            actions_taken.append(f"Blocked write outside workspace: {filepath}")
+            continue
+
         # Show preview
         lines = content.count("\n") + 1
         print(f"{MAGENTA}Action: write {filepath} ({lines} lines){RESET}")
@@ -237,8 +274,15 @@ def process_actions(response, messages, auto_approve=False):
     # Process file reads
     for match in READ_FILE_PATTERN.finditer(response):
         filepath = match.group(1)
-        print(f"{MAGENTA}Action: read {filepath}{RESET}")
 
+        # Validate path is within workspace
+        _, path_err = safe_resolve_path(filepath)
+        if path_err:
+            print(f"  {RED}Blocked: {path_err}{RESET}\n")
+            actions_taken.append(f"Blocked read outside workspace: {filepath}")
+            continue
+
+        print(f"{MAGENTA}Action: read {filepath}{RESET}")
         content, info = read_file(filepath)
         if content:
             lines = content.count("\n") + 1
@@ -254,6 +298,11 @@ def process_actions(response, messages, auto_approve=False):
     for match in RUN_CMD_PATTERN.finditer(response):
         cmd = match.group(1).strip()
         print(f"{MAGENTA}Action: run `{cmd}`{RESET}")
+
+        if DANGEROUS_PATTERNS.search(cmd):
+            print(f"  {RED}Blocked: command matched a dangerous pattern.{RESET}\n")
+            actions_taken.append(f"Blocked dangerous command: `{cmd}`")
+            continue
 
         if auto_approve or confirm("Run this command?"):
             output = run_shell(cmd)
@@ -295,8 +344,8 @@ def build_system_prompt(config):
         if len(entries) > 30:
             listing += f", ... ({len(entries) - 30} more)"
         parts.append(f"Files: {listing}")
-    except Exception:
-        pass
+    except (OSError, PermissionError) as e:
+        parts.append(f"Files: (unable to list: {e})")
 
     parts.append(
         "You have access to the user's working directory. "
@@ -430,8 +479,11 @@ def stream_response(client, messages, config):
     except KeyboardInterrupt:
         print(f"\n{DIM}(cancelled){RESET}\n")
         return None
+    except ConnectionError as e:
+        print(f"\n{RED}Connection error: {e}{RESET}\n")
+        return None
     except Exception as e:
-        print(f"\n{RED}Error: {e}{RESET}\n")
+        print(f"\n{RED}Error ({type(e).__name__}): {e}{RESET}\n")
         return None
 
 
@@ -579,9 +631,13 @@ def main():
             elif cmd == "/temp":
                 if arg:
                     try:
-                        config["temperature"] = float(arg)
-                        save_config(config)
-                        print(f"{DIM}Temperature set to {config['temperature']}{RESET}\n")
+                        val = float(arg)
+                        if not 0 <= val <= 2:
+                            print(f"{RED}Temperature must be between 0 and 2.{RESET}\n")
+                        else:
+                            config["temperature"] = val
+                            save_config(config)
+                            print(f"{DIM}Temperature set to {config['temperature']}{RESET}\n")
                     except ValueError:
                         print(f"{RED}Invalid temperature value.{RESET}\n")
                 else:
@@ -589,9 +645,13 @@ def main():
             elif cmd == "/max":
                 if arg:
                     try:
-                        config["max_tokens"] = int(arg)
-                        save_config(config)
-                        print(f"{DIM}Max tokens set to {config['max_tokens']}{RESET}\n")
+                        val = int(arg)
+                        if val < 1 or val > 16384:
+                            print(f"{RED}Max tokens must be between 1 and 16384.{RESET}\n")
+                        else:
+                            config["max_tokens"] = val
+                            save_config(config)
+                            print(f"{DIM}Max tokens set to {config['max_tokens']}{RESET}\n")
                     except ValueError:
                         print(f"{RED}Invalid max tokens value.{RESET}\n")
                 else:
@@ -677,8 +737,18 @@ def main():
                 if not arg:
                     output = run_shell("git diff")
                 else:
-                    path = resolve_path(arg)
-                    output = run_shell(f"git diff -- {path}")
+                    path, err = safe_resolve_path(arg)
+                    if err:
+                        print(f"{RED}{err}{RESET}\n")
+                        continue
+                    try:
+                        result = subprocess.run(
+                            ["git", "diff", "--", str(path)],
+                            capture_output=True, text=True, timeout=30, cwd=str(CWD)
+                        )
+                        output = (result.stdout + result.stderr).strip() or "(no changes)"
+                    except (subprocess.TimeoutExpired, OSError) as e:
+                        output = f"(error: {e})"
                 print(f"\n{output}\n")
             elif cmd == "/sh":
                 if not arg:
