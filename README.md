@@ -19,6 +19,7 @@ Built for **linux/amd64** — build via GitHub Actions or on an OCI x86 instance
 ├── cli/
 │   ├── chat.py                        # Terminal chat interface
 │   ├── loadtest.py                    # Concurrent load testing tool
+│   ├── parse_logs.py                  # vLLM log parser (outputs CSV)
 │   └── requirements.txt               # Python dependencies (openai, aiohttp)
 ├── ui/
 │   └── index.html                     # Browser-based chat UI for testing
@@ -184,6 +185,23 @@ Options:
 - `--temperature 0.3` — temperature
 
 Uses the saved config from `cli/chat.py` if `--endpoint`/`--key` are not provided.
+
+### Log Parser
+
+Parse vLLM container logs (copy from RunPod dashboard) into CSV for analysis:
+
+```bash
+# From a saved log file
+python cli/parse_logs.py runpod_logs.txt -o metrics.csv
+
+# Paste logs directly (Ctrl+D when done)
+python cli/parse_logs.py
+
+# Also export HTTP request data
+python cli/parse_logs.py runpod_logs.txt -o metrics.csv --requests-csv requests.csv
+```
+
+Extracts per-interval metrics: prompt/generation throughput (tok/s), running/waiting requests, GPU KV cache usage %, and prefix cache hit rate. Prints a summary with avg/max/min stats.
 
 ### Web UI
 
