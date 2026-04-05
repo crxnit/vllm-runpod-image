@@ -44,6 +44,7 @@
   let generating = false;
   let endpoint = '';
   let apikey = '';
+  let detectedModel = null;
 
   // Set placeholder
   if (promptEl && config.placeholder) {
@@ -81,8 +82,8 @@
       });
       if (res.ok) {
         const data = await res.json();
-        const modelName = data.data?.[0]?.id || 'unknown';
-        setStatus('connected', mode === 'developer' ? modelName : 'Connected');
+        detectedModel = data.data?.[0]?.id || null;
+        setStatus('connected', mode === 'developer' ? (detectedModel || 'unknown') : 'Connected');
       } else {
         setStatus('disconnected', 'HTTP ' + res.status);
       }
@@ -159,7 +160,7 @@
 
     try {
       const body = {
-        model: '/models/weights',
+        model: detectedModel || '/models/weights',
         messages: messages,
         max_tokens: maxTokens,
         temperature: temp,
