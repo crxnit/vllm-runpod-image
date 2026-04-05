@@ -18,7 +18,8 @@ Built for **linux/amd64** — build via GitHub Actions or on an OCI x86 instance
 ├── Dockerfile.baked                    # Single-stage image (model weights baked in)
 ├── cli/
 │   ├── chat.py                        # Terminal chat interface
-│   └── requirements.txt               # Python dependencies (openai)
+│   ├── loadtest.py                    # Concurrent load testing tool
+│   └── requirements.txt               # Python dependencies (openai, aiohttp)
 ├── ui/
 │   └── index.html                     # Browser-based chat UI for testing
 ├── scripts/
@@ -161,6 +162,28 @@ python cli/chat.py --endpoint https://your-pod-id-8000.proxy.runpod.net --key YO
 ```
 
 Features: streaming responses, multi-turn conversation, slash commands (`/help`, `/clear`, `/system`, `/temp`, `/max`, `/model`, `/history`), Ctrl+C to cancel. Config is saved to `~/.config/vllm-chat/config.json` so you only set it once.
+
+### Load Test
+
+```bash
+python cli/loadtest.py --endpoint https://your-pod-id-8000.proxy.runpod.net --key YOUR_API_KEY
+```
+
+Sends concurrent requests at increasing concurrency levels (default: 1, 5, 10, 20) and reports:
+
+| Metric | Description |
+|---|---|
+| Avg/P50/P99 | Response latency in seconds |
+| TTFT | Time to first token |
+| Tok/s | Total throughput across all concurrent requests |
+
+Options:
+- `--concurrency 1,5,10,20,30` — concurrency levels to test
+- `--requests 10` — requests per concurrency level
+- `--max-tokens 256` — max tokens per response
+- `--temperature 0.3` — temperature
+
+Uses the saved config from `cli/chat.py` if `--endpoint`/`--key` are not provided.
 
 ### Web UI
 
