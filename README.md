@@ -107,19 +107,22 @@ runpodctl template create \
   --name "vLLM Qwen2.5 Coder 3B AWQ" \
   --image "ghcr.io/<your-username>/vllm-runpod-image:3b-coder-awq" \
   --container-disk-in-gb 20 \
-  --ports "8000/http" \
+  --ports "8000/http,22/tcp" \
   --env '{"VLLM_API_KEY":"your-api-key-here"}'
 ```
+
+Port `22/tcp` enables SSH access. Make sure your SSH public key is added in RunPod account settings.
 
 Generate an API key with `openssl rand -hex 32`.
 
 ### Recommended GPUs
 
-| Model size | Recommended GPUs |
-|---|---|
-| 3B AWQ | RTX A4000, L4, RTX A5000 |
-| 7B-14B AWQ | RTX A5000, RTX 4090 |
-| 32B AWQ | A100, H100 |
+| Model size | Recommended GPUs | Container Disk |
+|---|---|---|
+| 3B AWQ | RTX A4000, L4, RTX A5000 | 20GB |
+| 7B-14B AWQ | RTX A5000, RTX 4090 | 30GB |
+| 32B AWQ | RTX A5000, RTX 4090 (24GB) | 40GB |
+| 70B AWQ | A100 80GB | 80GB |
 
 ### Temperature Setting
 
@@ -137,9 +140,10 @@ For testing code models, use **0.0-0.3** for consistent, correct output that ref
 
 ### Notes
 
-- Container disk: 20GB is sufficient for baked images
+- Container disk: see GPU table above for sizing per model
 - No volume disk needed — model weights are baked into the image
 - Pods without a network volume can only be terminated, not stopped
+- Port configuration (including SSH) is set at pod creation time — cannot be changed on a running pod
 - The API is OpenAI-compatible on port 8000 (use `/v1/chat/completions`)
 
 ### Test the API

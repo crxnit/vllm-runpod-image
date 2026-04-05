@@ -66,7 +66,9 @@ All three workflows are **manual dispatch only** (`workflow_dispatch`):
 
 ## RunPod Deployment
 
-- Create a RunPod template via `runpodctl template create` with the GHCR image, port 8000/http, and `VLLM_API_KEY` env var.
-- Recommended GPU for 3B AWQ models: RTX A4000, L4, or RTX A5000. Larger models (14B, 32B) need A100/H100.
-- Container disk: 20GB. No volume disk needed (weights are baked in).
+- Create a RunPod template via `runpodctl template create` with the GHCR image, ports `8000/http,22/tcp`, and `VLLM_API_KEY` env var. Port 22 enables SSH access.
+- Recommended GPU for 3B AWQ models: RTX A4000, L4, or RTX A5000. 32B models need an A5000/4090 (24GB). 70B AWQ models need A100 80GB.
+- Container disk: 20GB for 3B models, 40GB for 32B, 80GB for 70B.
+- No volume disk needed (weights are baked in).
 - Pods without a network volume can only be terminated, not stopped.
+- Port configuration is set at pod creation time — cannot be changed on a running pod.
