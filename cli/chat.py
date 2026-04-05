@@ -174,10 +174,23 @@ def run_shell(cmd):
         return f"(error: {e})"
 
 
-def confirm(prompt):
-    """Ask user for y/n confirmation."""
+def flush_stdin():
+    """Drain any buffered input from stdin."""
     try:
-        answer = input(f"{YELLOW}{prompt} [y/n]{RESET} ").strip().lower()
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except (ImportError, termios.error):
+        pass
+
+
+def confirm(prompt):
+    """Ask user for Y/n confirmation."""
+    try:
+        flush_stdin()
+        answer = input(f"{YELLOW}{prompt} [Y/n]{RESET} ").strip().lower()
+        # Default to yes on empty input
+        if answer == "":
+            return True
         return answer in ("y", "yes")
     except (EOFError, KeyboardInterrupt):
         print()
