@@ -131,9 +131,18 @@ runpodctl template create \
 | Model size | Recommended GPUs | Container Disk | MAX_MODEL_LEN |
 |---|---|---|---|
 | 3B AWQ | RTX A4000, L4, RTX A5000 | 20GB | 16384 (default) |
-| 7B-14B AWQ | RTX A5000, RTX 4090 | 30GB | 16384 (default) |
+| 14B AWQ | RTX A4000, RTX A5000 | 30GB | 16384 (default) |
 | 32B AWQ | RTX A5000, RTX 4090 (24GB) | 40GB | 4096 |
 | 70B AWQ | A100 80GB | 80GB | 8192 |
+
+### Available Images
+
+| Tag | Model | Use case |
+|---|---|---|
+| `3b-coder-awq-oci` | Qwen2.5-Coder-3B-Instruct-AWQ | Lightweight coding assistant |
+| `14b-instruct-awq` | Qwen2.5-14B-Instruct-AWQ | General purpose / conversational |
+| `qwen3-32b-awq` | Qwen3-32B-AWQ | Advanced reasoning / coding |
+| `llama31-70b-awq` | Meta-Llama-3.1-70B-Instruct-AWQ | Highest quality, needs A100 |
 
 ### Temperature Setting
 
