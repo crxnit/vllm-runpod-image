@@ -169,7 +169,7 @@ python /path/to/cli/chat.py --endpoint https://your-pod-id-8000.proxy.runpod.net
 
 Workspace-aware chat that automatically includes your CWD, git branch, and file listing in the model's context. Config is saved to `~/.config/vllm-chat/config.json` so you only set endpoint/key once.
 
-**Chat commands:** `/help`, `/clear`, `/system`, `/temp`, `/max`, `/model`, `/history`, `/config`, `/quit`
+**Chat commands:** `/help`, `/clear`, `/system`, `/temp`, `/max`, `/model`, `/history`, `/config`, `/auto`, `/quit`
 
 **Workspace commands:**
 - `/ls [path]` — list files
@@ -179,6 +179,8 @@ Workspace-aware chat that automatically includes your CWD, git branch, and file 
 - `/diff [file]` — show git diff
 - `/sh <command>` — run shell command (30s timeout)
 - `/pwd` — show working directory
+
+**Autonomous mode:** the model can read/write files and run commands on its own. Each action requires confirmation unless auto-approve is enabled (`/auto` or `--auto-approve`). Example: ask `create a Python script that reverses a string` and the model will write the file directly.
 
 **Inline file references:** use `@filename.py` in your message to automatically attach file contents (e.g. `explain what @main.py does`).
 

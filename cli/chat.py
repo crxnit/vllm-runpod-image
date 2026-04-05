@@ -5,6 +5,7 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,43 @@ IGNORE_PATTERNS = [
 
 CWD = Path.cwd()
 
+# Patterns for parsing autonomous actions from model responses
+WRITE_FILE_PATTERN = re.compile(
+    r"<write_file\s+path=[\"']([^\"']+)[\"']\s*>(.*?)</write_file>",
+    re.DOTALL,
+)
+RUN_CMD_PATTERN = re.compile(
+    r"<run_command>(.*?)</run_command>",
+    re.DOTALL,
+)
+READ_FILE_PATTERN = re.compile(
+    r"<read_file\s+path=[\"']([^\"']+)[\"']\s*/?>",
+)
+
+AGENT_INSTRUCTIONS = """\
+You can perform actions in the user's workspace using these tags:
+
+To write or create a file:
+<write_file path="relative/path.py">
+file contents here
+</write_file>
+
+To read a file into context:
+<read_file path="relative/path.py"/>
+
+To run a shell command:
+<run_command>command here</run_command>
+
+Rules:
+- Always use these tags when the user asks you to create, edit, or write files.
+- Always use these tags when you need to read a file to answer a question.
+- Always use these tags when the user asks you to run a command.
+- Write complete file contents, not partial snippets.
+- The user will be asked to approve each action before it executes.
+- You can include multiple actions in a single response.
+- Prefer relative paths from the working directory.
+"""
+
 
 def load_config():
     if CONFIG_PATH.exists():
@@ -48,7 +86,6 @@ def save_config(config):
 
 
 def should_ignore(name):
-    """Check if a file/dir should be ignored in listings."""
     for pattern in IGNORE_PATTERNS:
         if fnmatch.fnmatch(name, pattern):
             return True
@@ -56,18 +93,14 @@ def should_ignore(name):
 
 
 def get_tree(directory, prefix="", max_depth=3, current_depth=0):
-    """Generate a tree view of a directory."""
     if current_depth >= max_depth:
         return ""
-
     lines = []
     try:
         entries = sorted(directory.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
     except PermissionError:
         return ""
-
     entries = [e for e in entries if not should_ignore(e.name)]
-
     for i, entry in enumerate(entries):
         is_last = i == len(entries) - 1
         connector = "└── " if is_last else "├── "
@@ -79,12 +112,10 @@ def get_tree(directory, prefix="", max_depth=3, current_depth=0):
             size = entry.stat().st_size
             size_str = format_size(size)
             lines.append(f"{prefix}{connector}{entry.name}  {DIM}({size_str}){RESET}")
-
     return "\n".join(line for line in lines if line)
 
 
 def format_size(size):
-    """Format file size in human-readable form."""
     for unit in ["B", "KB", "MB", "GB"]:
         if size < 1024:
             return f"{size:.0f}{unit}" if unit == "B" else f"{size:.1f}{unit}"
@@ -93,7 +124,6 @@ def format_size(size):
 
 
 def resolve_path(path_str):
-    """Resolve a path relative to CWD."""
     p = Path(path_str).expanduser()
     if not p.is_absolute():
         p = CWD / p
@@ -101,7 +131,6 @@ def resolve_path(path_str):
 
 
 def read_file(path_str):
-    """Read a file and return its contents with metadata."""
     path = resolve_path(path_str)
     if not path.exists():
         return None, f"File not found: {path}"
@@ -119,7 +148,6 @@ def read_file(path_str):
 
 
 def write_file(path_str, content):
-    """Write content to a file."""
     path = resolve_path(path_str)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -131,7 +159,6 @@ def write_file(path_str, content):
 
 
 def run_shell(cmd):
-    """Run a shell command and return output."""
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
@@ -147,8 +174,88 @@ def run_shell(cmd):
         return f"(error: {e})"
 
 
+def confirm(prompt):
+    """Ask user for y/n confirmation."""
+    try:
+        answer = input(f"{YELLOW}{prompt} [y/n]{RESET} ").strip().lower()
+        return answer in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+
+def process_actions(response, messages, auto_approve=False):
+    """Parse and execute autonomous actions from model response."""
+    actions_taken = []
+
+    # Process file writes
+    for match in WRITE_FILE_PATTERN.finditer(response):
+        filepath = match.group(1)
+        content = match.group(2).strip()
+
+        # Show preview
+        lines = content.count("\n") + 1
+        print(f"{MAGENTA}Action: write {filepath} ({lines} lines){RESET}")
+
+        # Show first/last few lines
+        content_lines = content.split("\n")
+        if len(content_lines) <= 10:
+            for line in content_lines:
+                print(f"  {DIM}{line}{RESET}")
+        else:
+            for line in content_lines[:5]:
+                print(f"  {DIM}{line}{RESET}")
+            print(f"  {DIM}... ({len(content_lines) - 10} more lines) ...{RESET}")
+            for line in content_lines[-5:]:
+                print(f"  {DIM}{line}{RESET}")
+
+        if auto_approve or confirm("Write this file?"):
+            ok, info = write_file(filepath, content + "\n")
+            if ok:
+                print(f"  {GREEN}Wrote {info}{RESET}\n")
+                actions_taken.append(f"Wrote {info}")
+            else:
+                print(f"  {RED}{info}{RESET}\n")
+                actions_taken.append(f"Failed to write {filepath}: {info}")
+        else:
+            print(f"  {DIM}Skipped.{RESET}\n")
+            actions_taken.append(f"User skipped writing {filepath}")
+
+    # Process file reads
+    for match in READ_FILE_PATTERN.finditer(response):
+        filepath = match.group(1)
+        print(f"{MAGENTA}Action: read {filepath}{RESET}")
+
+        content, info = read_file(filepath)
+        if content:
+            lines = content.count("\n") + 1
+            print(f"  {DIM}Read {info} ({lines} lines){RESET}\n")
+            file_msg = f"Contents of {info}:\n```\n{content}\n```"
+            messages.append({"role": "user", "content": file_msg})
+            actions_taken.append(f"Read {info}")
+        else:
+            print(f"  {RED}{info}{RESET}\n")
+            actions_taken.append(f"Failed to read {filepath}: {info}")
+
+    # Process shell commands
+    for match in RUN_CMD_PATTERN.finditer(response):
+        cmd = match.group(1).strip()
+        print(f"{MAGENTA}Action: run `{cmd}`{RESET}")
+
+        if auto_approve or confirm("Run this command?"):
+            output = run_shell(cmd)
+            print(f"  {DIM}{output}{RESET}\n")
+            # Feed output back to conversation
+            messages.append({"role": "user", "content": f"Command output for `{cmd}`:\n```\n{output}\n```"})
+            actions_taken.append(f"Ran `{cmd}`")
+        else:
+            print(f"  {DIM}Skipped.{RESET}\n")
+            actions_taken.append(f"User skipped running `{cmd}`")
+
+    return actions_taken
+
+
 def build_system_prompt(config):
-    """Build system prompt with workspace context."""
     parts = []
 
     # User-defined system prompt
@@ -185,17 +292,17 @@ def build_system_prompt(config):
         "When writing code, be precise and match the existing style."
     )
 
+    # Agent instructions
+    parts.append(AGENT_INSTRUCTIONS)
+
     return "\n\n".join(parts)
 
 
 def inject_file_context(text):
-    """Check if user message references files with @file syntax and inject contents."""
     if "@" not in text:
         return text, []
 
-    import re
     files_added = []
-    # Match @path/to/file patterns
     pattern = re.compile(r"@([\w./\-_]+\.\w+)")
 
     for match in pattern.finditer(text):
@@ -207,7 +314,6 @@ def inject_file_context(text):
     if not files_added:
         return text, []
 
-    # Build context with file contents
     context_parts = [text, "", "---", "Referenced files:", ""]
     for filepath, content in files_added:
         context_parts.append(f"### {filepath}")
@@ -230,6 +336,7 @@ def print_help():
   {CYAN}/max VALUE{RESET}         Set max tokens
   {CYAN}/system MSG{RESET}        Set system prompt
   {CYAN}/history{RESET}           Show conversation history
+  {CYAN}/auto{RESET}              Toggle auto-approve mode (skip confirmations)
   {CYAN}/quit{RESET}              Exit
 
 {BOLD}Workspace Commands:{RESET}
@@ -240,6 +347,11 @@ def print_help():
   {CYAN}/diff <file>{RESET}       Show git diff for a file
   {CYAN}/sh <command>{RESET}      Run a shell command (30s timeout)
   {CYAN}/pwd{RESET}               Show working directory
+
+{BOLD}Autonomous Mode:{RESET}
+  The model can autonomously read/write files and run commands.
+  Each action requires your approval (unless {CYAN}/auto{RESET} is enabled).
+  Example: "create a Python script that reverses a string"
 
 {BOLD}Inline File References:{RESET}
   Use {CYAN}@filename.py{RESET} in your message to automatically include file contents.
@@ -258,6 +370,7 @@ def print_config(config):
     print(f"  Temperature: {config.get('temperature', 0.7)}")
     print(f"  Max Tokens:  {config.get('max_tokens', 1024)}")
     print(f"  System:      {config.get('system', DIM + 'none' + RESET)}")
+    print(f"  Auto-approve:{YELLOW} {'ON' if config.get('auto_approve') else 'OFF'}{RESET}")
     print(f"  Config file: {DIM}{CONFIG_PATH}{RESET}")
     print(f"\n{BOLD}Workspace:{RESET}")
     print(f"  Directory:   {CWD}")
@@ -310,18 +423,15 @@ def stream_response(client, messages, config):
 
 
 def read_input():
-    """Read user input, supporting multi-line with blank line termination."""
     lines = []
     try:
         first = input(f"{CYAN}you{RESET}: ")
     except EOFError:
         return None
 
-    # Single line input (most common)
     if first.strip() != "":
         return first
 
-    # Multi-line: first line was blank, keep reading
     print(f"{DIM}(multi-line mode, blank line to send){RESET}")
     try:
         while True:
@@ -343,11 +453,11 @@ def main():
     parser.add_argument("--temperature", type=float, help="Temperature", default=None)
     parser.add_argument("--max-tokens", type=int, help="Max tokens", default=None)
     parser.add_argument("--system", help="System prompt", default=None)
+    parser.add_argument("--auto-approve", action="store_true", help="Skip action confirmations")
     args = parser.parse_args()
 
     config = load_config()
 
-    # CLI args override saved config
     if args.endpoint:
         config["endpoint"] = args.endpoint
     if args.key:
@@ -360,11 +470,17 @@ def main():
         config["max_tokens"] = args.max_tokens
     if args.system:
         config["system"] = args.system
+    if args.auto_approve:
+        config["auto_approve"] = True
 
     save_config(config)
 
+    auto_approve = config.get("auto_approve", False)
+
     print(f"\n{BOLD}vLLM Chat{RESET} {DIM}(type /help for commands){RESET}")
     print(f"{DIM}Workspace: {CWD}{RESET}")
+    if auto_approve:
+        print(f"{YELLOW}Auto-approve: ON (actions execute without confirmation){RESET}")
 
     endpoint = config.get("endpoint", "")
     if endpoint:
@@ -382,7 +498,6 @@ def main():
 
     print()
 
-    # Build initial system prompt with workspace context
     messages = []
     system_prompt = build_system_prompt(config)
     messages.append({"role": "system", "content": system_prompt})
@@ -421,6 +536,12 @@ def main():
                 print(f"{DIM}Conversation cleared.{RESET}\n")
             elif cmd == "/config":
                 print_config(config)
+            elif cmd == "/auto":
+                auto_approve = not auto_approve
+                config["auto_approve"] = auto_approve
+                save_config(config)
+                state = f"{GREEN}ON{RESET}" if auto_approve else f"{RED}OFF{RESET}"
+                print(f"{DIM}Auto-approve: {state}\n")
             elif cmd == "/endpoint":
                 if arg:
                     config["endpoint"] = arg.rstrip("/")
@@ -466,14 +587,13 @@ def main():
                 if arg:
                     config["system"] = arg
                     save_config(config)
-                    # Rebuild system prompt with workspace context
                     messages = [m for m in messages if m["role"] != "system"]
                     messages.insert(0, {"role": "system", "content": build_system_prompt(config)})
                     print(f"{DIM}System prompt set.{RESET}\n")
                 else:
                     print(f"System: {config.get('system', 'none')}\n")
             elif cmd == "/history":
-                if len(messages) <= 1:  # only system message
+                if len(messages) <= 1:
                     print(f"{DIM}No messages.{RESET}\n")
                 else:
                     print()
@@ -484,8 +604,6 @@ def main():
                         content_preview = m["content"][:100] + ("..." if len(m["content"]) > 100 else "")
                         print(f"  {role_color}{m['role']}{RESET}: {content_preview}")
                     print()
-
-            # Workspace commands
             elif cmd == "/pwd":
                 print(f"  {CWD}\n")
             elif cmd == "/ls":
@@ -535,11 +653,8 @@ def main():
                 elif not last_response:
                     print(f"{RED}No assistant response to write.{RESET}\n")
                 else:
-                    # Extract code blocks if present, otherwise write full response
-                    import re
                     code_blocks = re.findall(r"```(?:\w*\n)?(.*?)```", last_response, re.DOTALL)
                     content = code_blocks[0].strip() if code_blocks else last_response
-
                     ok, info = write_file(arg, content + "\n")
                     if ok:
                         print(f"{DIM}Wrote to {info}{RESET}\n")
@@ -579,8 +694,22 @@ def main():
         if response:
             messages.append({"role": "assistant", "content": response})
             last_response = response
+
+            # Process autonomous actions
+            actions = process_actions(response, messages, auto_approve)
+            if actions:
+                # If there were read_file or run_command actions, send results back to model
+                has_followup = any("Read " in a or "Ran " in a for a in actions)
+                if has_followup:
+                    print(f"{DIM}Sending action results back to model...{RESET}")
+                    followup = stream_response(client, messages, config)
+                    if followup:
+                        messages.append({"role": "assistant", "content": followup})
+                        last_response = followup
+                        # Process any actions in the followup too
+                        process_actions(followup, messages, auto_approve)
         else:
-            messages.pop()  # remove failed user message
+            messages.pop()
 
 
 if __name__ == "__main__":
