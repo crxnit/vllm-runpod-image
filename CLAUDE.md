@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Docker image for serving LLMs with vLLM on RunPod GPU pods. Built for **linux/amd64** and deployed to GHCR. The default model is `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ`.
+Docker image for serving LLMs with vLLM on RunPod GPU pods. Built for **linux/amd64** and deployed to GHCR. Includes purpose-built web chat UIs (e.g. college admissions advisor) and CLI tools for testing. The recommended model for interactive chat is `Qwen/Qwen2.5-7B-Instruct-AWQ` on an RTX A5000.
 
 ## Two Dockerfile Variants
 
@@ -67,8 +67,7 @@ All three workflows are **manual dispatch only** (`workflow_dispatch`):
 ## RunPod Deployment
 
 - Create a RunPod template via `runpodctl template create` with the GHCR image, ports `8000/http,22/tcp`, and `VLLM_API_KEY` env var. Port 22 enables SSH access.
-- Recommended GPUs: 3B/14B AWQ on RTX A4000/A5000 (default `MAX_MODEL_LEN=16384`). 32B AWQ on A5000/4090 with `MAX_MODEL_LEN=4096`. 70B AWQ on A100 80GB with `MAX_MODEL_LEN=8192`.
-- Container disk: 20GB for 3B models, 40GB for 32B, 80GB for 70B. No volume disk needed.
-- No volume disk needed (weights are baked in).
+- Recommended for interactive chat: 7B AWQ on RTX A5000 ($0.27/hr) — best speed/cost balance. 3B/14B AWQ also fit on A4000/A5000. 32B AWQ needs `MAX_MODEL_LEN=4096` on 24GB GPUs. 70B AWQ needs A100 80GB with `MAX_MODEL_LEN=8192`. All images default `MAX_NUM_SEQS=64` to prevent warmup OOM.
+- Container disk: 20GB for 3B/7B models, 30GB for 14B, 40GB for 32B, 80GB for 70B. No volume disk needed (weights are baked in).
 - Pods without a network volume can only be terminated, not stopped.
 - Port configuration is set at pod creation time — cannot be changed on a running pod.

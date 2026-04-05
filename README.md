@@ -1,6 +1,6 @@
 # vLLM RunPod Image
 
-Custom Docker image for serving coding LLMs with vLLM on RunPod GPU pods.
+Docker images for serving LLMs with vLLM on RunPod GPU pods, with purpose-built web chat UIs and CLI tools.
 
 Built for **linux/amd64** — build via GitHub Actions or on an OCI x86 instance.
 
@@ -25,8 +25,12 @@ Built for **linux/amd64** — build via GitHub Actions or on an OCI x86 instance
 │   ├── shared/
 │   │   ├── styles.css                 # Shared CSS (theming via CSS variables)
 │   │   └── chat.js                    # Shared chat engine (config-driven)
+│   ├── prompts/
+│   │   └── college-advisor-full.txt   # Full college advisor system prompt
 │   ├── index.html                     # Developer chat UI (settings bar)
 │   └── college-advisor.html           # College admissions advisor chat
+├── docs/
+│   └── gitea-self-hosted-registry.md  # Self-hosted Gitea registry guide
 ├── scripts/
 │   ├── start.sh                       # Baked image entrypoint (vLLM serve)
 │   ├── pre_start.sh                   # RunPod pre-start hook
@@ -135,6 +139,7 @@ runpodctl template create \
 | Model size | Recommended GPUs | Container Disk | MAX_MODEL_LEN |
 |---|---|---|---|
 | 3B AWQ | RTX A4000, L4, RTX A5000 | 20GB | 16384 (default) |
+| 7B AWQ | RTX A5000 (best value for chat) | 20GB | 16384 (default) |
 | 14B AWQ | RTX A4000, RTX A5000 | 30GB | 16384 (default) |
 | 32B AWQ | RTX A5000, RTX 4090 (24GB) | 40GB | 4096 |
 | 70B AWQ | A100 80GB | 80GB | 8192 |
@@ -144,6 +149,7 @@ runpodctl template create \
 | Tag | Model | Use case |
 |---|---|---|
 | `3b-coder-awq-oci` | Qwen2.5-Coder-3B-Instruct-AWQ | Lightweight coding assistant |
+| `7b-instruct-awq` | Qwen2.5-7B-Instruct-AWQ | Interactive chat (recommended) |
 | `14b-instruct-awq` | Qwen2.5-14B-Instruct-AWQ | General purpose / conversational |
 | `qwen3-32b-awq` | Qwen3-32B-AWQ | Advanced reasoning / coding |
 | `llama31-70b-awq` | Meta-Llama-3.1-70B-Instruct-AWQ | Highest quality, needs A100 |
