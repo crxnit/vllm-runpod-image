@@ -39,6 +39,9 @@
   .message.assistant em { color: #a5b4fc; }
   .message.error { align-self: center; background: #3d0a0a; color: #f87171; font-size: 13px; }
   .message .meta { font-size: 11px; color: #64748b; margin-top: 8px; }
+  .thinking-indicator { color: #64748b; font-style: italic; }
+  @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+  .thinking-indicator { animation: pulse 1.5s ease-in-out infinite; }
 
   /* Starters */
   .starters { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 24px; justify-content: center; }
@@ -266,7 +269,11 @@ async function send() {
   sendBtn.disabled = true;
 
   const assistantDiv = addMessage('assistant', '');
+  // Show a thinking indicator while model reasons
+  assistantDiv.innerHTML = '<span class="thinking-indicator">Thinking...</span>';
   let fullContent = '';
+  let displayContent = '';
+  let inThinking = false;
   const startTime = Date.now();
 
   try {
@@ -279,9 +286,10 @@ async function send() {
       body: JSON.stringify({
         model: '/models/weights',
         messages: messages,
-        max_tokens: 1500,
+        max_tokens: 2500,
         temperature: 0.6,
-        stream: true
+        stream: true,
+        chat_template_kwargs: { "enable_thinking": false }
       })
     });
 
@@ -293,6 +301,7 @@ async function send() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let thinkingCleared = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -311,12 +320,50 @@ async function send() {
           const delta = json.choices?.[0]?.delta?.content;
           if (delta) {
             fullContent += delta;
-            assistantDiv.textContent = fullContent;
-            chatEl.scrollTop = chatEl.scrollHeight;
+
+            // Strip <think>...</think> blocks from display
+            // Track if we're inside a thinking block
+            let i = 0;
+            while (i < delta.length) {
+              if (!inThinking) {
+                const thinkStart = delta.indexOf('<think>', i);
+                if (thinkStart !== -1) {
+                  displayContent += delta.slice(i, thinkStart);
+                  inThinking = true;
+                  i = thinkStart + 7;
+                } else {
+                  displayContent += delta.slice(i);
+                  i = delta.length;
+                }
+              } else {
+                const thinkEnd = delta.indexOf('</think>', i);
+                if (thinkEnd !== -1) {
+                  inThinking = false;
+                  i = thinkEnd + 8;
+                } else {
+                  i = delta.length;
+                }
+              }
+            }
+
+            // Only show non-thinking content
+            const trimmed = displayContent.trim();
+            if (trimmed && !thinkingCleared) {
+              assistantDiv.textContent = '';
+              thinkingCleared = true;
+            }
+            if (thinkingCleared) {
+              assistantDiv.textContent = trimmed;
+              chatEl.scrollTop = chatEl.scrollHeight;
+            }
           }
         } catch (e) {}
       }
     }
+
+    // Final cleanup — remove any remaining think tags
+    const cleanContent = displayContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    assistantDiv.textContent = cleanContent;
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     const meta = document.createElement('div');
@@ -324,7 +371,7 @@ async function send() {
     meta.textContent = elapsed + 's';
     assistantDiv.appendChild(meta);
 
-    messages.push({ role: 'assistant', content: fullContent });
+    messages.push({ role: 'assistant', content: cleanContent });
 
   } catch (e) {
     assistantDiv.className = 'message error';
