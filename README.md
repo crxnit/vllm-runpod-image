@@ -163,10 +163,24 @@ Two interfaces are included for testing deployed models.
 
 ```bash
 pip install -r cli/requirements.txt
-python cli/chat.py --endpoint https://your-pod-id-8000.proxy.runpod.net --key YOUR_API_KEY
+cd /path/to/your/project
+python /path/to/cli/chat.py --endpoint https://your-pod-id-8000.proxy.runpod.net --key YOUR_API_KEY
 ```
 
-Features: streaming responses, multi-turn conversation, slash commands (`/help`, `/clear`, `/system`, `/temp`, `/max`, `/model`, `/history`), Ctrl+C to cancel. Config is saved to `~/.config/vllm-chat/config.json` so you only set it once.
+Workspace-aware chat that automatically includes your CWD, git branch, and file listing in the model's context. Config is saved to `~/.config/vllm-chat/config.json` so you only set endpoint/key once.
+
+**Chat commands:** `/help`, `/clear`, `/system`, `/temp`, `/max`, `/model`, `/history`, `/config`, `/quit`
+
+**Workspace commands:**
+- `/ls [path]` — list files
+- `/tree [path]` — directory tree (3 levels)
+- `/read <file>` — inject file contents into conversation
+- `/write <file>` — write last response (extracts code blocks) to file
+- `/diff [file]` — show git diff
+- `/sh <command>` — run shell command (30s timeout)
+- `/pwd` — show working directory
+
+**Inline file references:** use `@filename.py` in your message to automatically attach file contents (e.g. `explain what @main.py does`).
 
 ### Load Test
 
