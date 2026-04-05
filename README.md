@@ -128,12 +128,12 @@ runpodctl template create \
 
 ### Recommended GPUs
 
-| Model size | Recommended GPUs | Container Disk |
-|---|---|---|
-| 3B AWQ | RTX A4000, L4, RTX A5000 | 20GB |
-| 7B-14B AWQ | RTX A5000, RTX 4090 | 30GB |
-| 32B AWQ | RTX A5000, RTX 4090 (24GB) | 40GB |
-| 70B AWQ | A100 80GB | 80GB |
+| Model size | Recommended GPUs | Container Disk | MAX_MODEL_LEN |
+|---|---|---|---|
+| 3B AWQ | RTX A4000, L4, RTX A5000 | 20GB | 16384 (default) |
+| 7B-14B AWQ | RTX A5000, RTX 4090 | 30GB | 16384 (default) |
+| 32B AWQ | RTX A5000, RTX 4090 (24GB) | 40GB | 4096 |
+| 70B AWQ | A100 80GB | 80GB | 8192 |
 
 ### Temperature Setting
 
