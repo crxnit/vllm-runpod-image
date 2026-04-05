@@ -119,6 +119,20 @@ Generate an API key with `openssl rand -hex 32`.
 | 7B-14B AWQ | RTX A5000, RTX 4090 |
 | 32B AWQ | A100, H100 |
 
+### Temperature Setting
+
+Temperature controls the randomness of the model's output. Configurable in both the web UI and CLI (`/temp`).
+
+| Value | Behavior | Use case |
+|---|---|---|
+| 0 | Deterministic, always picks the most likely token | Code generation, factual answers, reproducible output |
+| 0.1-0.5 | Low randomness, mostly focused and predictable | Code evaluation, technical tasks |
+| 0.7 (default) | Balanced randomness | General conversation |
+| 1.0-1.5 | More creative and varied | Brainstorming, creative writing |
+| 2.0 | Maximum randomness, often incoherent | Not recommended |
+
+For testing code models, use **0.0-0.3** for consistent, correct output that reflects the model's actual capabilities.
+
 ### Notes
 
 - Container disk: 20GB is sufficient for baked images
