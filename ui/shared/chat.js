@@ -300,7 +300,7 @@
 
     setStatus(cls, text) {
       if (!this.status) return;
-      this.status.className = cls;
+      this.status.className = 'status-badge ' + cls;
       this.status.textContent = text;
     },
 
