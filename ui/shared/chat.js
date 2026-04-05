@@ -71,6 +71,19 @@
   }
 
   // =========================================================================
+  // Markdown — delegates to shared/markdown.js if available
+  // =========================================================================
+  function renderMd(text) {
+    if (window.renderMarkdown) return window.renderMarkdown(text);
+    // Fallback: plain text with HTML escaping
+    return '<p>' + escapeHtml(text) + '</p>';
+  }
+
+  function bindCodeCopy(container) {
+    if (window.attachCodeCopyListeners) window.attachCodeCopyListeners(container);
+  }
+
+  // =========================================================================
   // Storage — reads/writes connection and settings to localStorage
   // =========================================================================
   const storage = {
@@ -79,11 +92,36 @@
     getApiKey()      { return localStorage.getItem(this._key('apikey')) || ''; },
     getMaxTokens()   { return localStorage.getItem(this._key('max-tokens')) || String(defaultMaxTokens); },
     getTemperature() { return localStorage.getItem(this._key('temperature')) || String(defaultTemperature); },
+    getTheme()       { return localStorage.getItem('chat-theme') || 'dark'; },
     saveEndpoint(v)    { safeSaveStorage(this._key('endpoint'), v); },
     saveApiKey(v)      { safeSaveStorage(this._key('apikey'), v); },
     saveMaxTokens(v)   { safeSaveStorage(this._key('max-tokens'), v); },
     saveTemperature(v) { safeSaveStorage(this._key('temperature'), v); },
+    saveTheme(v)       { safeSaveStorage('chat-theme', v); },
   };
+
+  // =========================================================================
+  // Theme
+  // =========================================================================
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+  }
+
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
+    const next = current === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    storage.saveTheme(next);
+    updateThemeButton();
+  }
+
+  function updateThemeButton() {
+    const btn = document.querySelector('.btn-theme');
+    if (!btn) return;
+    const theme = document.documentElement.getAttribute('data-theme') || 'dark';
+    btn.textContent = theme === 'dark' ? '\u2600' : '\u263E'; // sun / moon
+    btn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+  }
 
   // =========================================================================
   // Connection — manages endpoint, apikey, and model detection
@@ -255,10 +293,13 @@
     chat: null, prompt: null, send: null, clear: null,
     status: null, starters: null, overlay: null,
     endpoint: null, apikey: null, maxTokens: null, temperature: null,
+    retry: null, export: null,
 
     build() {
       const app = document.getElementById('chat-app') || document.body;
       app.innerHTML = '';
+
+      const themeBtn = '<button class="btn-theme" title="Toggle theme">\u2600</button>';
 
       if (mode === 'developer') {
         app.innerHTML += `
@@ -280,6 +321,7 @@
               <input type="number" class="js-temperature" value="${defaultTemperature}" min="0" max="2" step="0.1" style="width:70px">
             </div>
             <span class="status-badge disconnected">Not connected</span>
+            ${themeBtn}
           </div>`;
       } else {
         const titleHtml = config.titleAccent
@@ -293,7 +335,10 @@
               <h1>${titleHtml}</h1>
               ${subtitleHtml}
             </div>
-            <span class="status-badge disconnected">Not connected</span>
+            <div class="header-right">
+              <span class="status-badge disconnected">Not connected</span>
+              ${themeBtn}
+            </div>
           </div>`;
       }
 
@@ -302,6 +347,8 @@
         <div class="starters"></div>
         <div class="input-area">
           <textarea class="chat-prompt" rows="1" placeholder="${escapeAttr(config.placeholder || 'Type a message...')}"></textarea>
+          <button class="btn-retry" title="Retry last message">Retry</button>
+          <button class="btn-export" title="Export conversation">Export</button>
           <button class="btn-clear">Clear</button>
           <button class="btn-send">Send</button>
         </div>`;
@@ -328,6 +375,8 @@
       this.prompt = q('.chat-prompt');
       this.send = q('.btn-send');
       this.clear = q('.btn-clear');
+      this.retry = q('.btn-retry');
+      this.export = q('.btn-export');
       this.status = q('.status-badge');
       this.starters = q('.starters');
       this.overlay = q('.setup-overlay');
@@ -346,14 +395,30 @@
     addMessage(role, content) {
       const div = document.createElement('div');
       div.className = 'message ' + role;
-      if (content) div.textContent = content;
+      if (content) {
+        if (role === 'assistant') {
+          div.innerHTML = renderMd(content);
+          bindCodeCopy(div);
+        } else {
+          div.textContent = content;
+        }
+      }
       this.chat.appendChild(div);
-      this.chat.scrollTop = this.chat.scrollHeight;
+      this.scrollToBottom();
       return div;
     },
 
     scrollToBottom() {
-      this.chat.scrollTop = this.chat.scrollHeight;
+      const el = this.chat;
+      if (!el) return;
+      const isNearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
+      if (isNearBottom) {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      }
+    },
+
+    forceScrollToBottom() {
+      if (this.chat) this.chat.scrollTo({ top: this.chat.scrollHeight, behavior: 'smooth' });
     },
   };
 
@@ -381,6 +446,19 @@
     return responseProcessors.reduce((t, fn) => fn(t), text);
   }
 
+  function addCopyButton(div, rawContent) {
+    const btn = document.createElement('button');
+    btn.className = 'msg-copy-btn';
+    btn.textContent = 'Copy';
+    btn.addEventListener('click', () => {
+      navigator.clipboard.writeText(rawContent).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      });
+    });
+    div.appendChild(btn);
+  }
+
   async function send() {
     const text = dom.prompt.value.trim();
     if (!text) return;
@@ -406,9 +484,7 @@
     dom.send.disabled = true;
 
     const assistantDiv = dom.addMessage('assistant', '');
-    if (stripThinking) {
-      assistantDiv.innerHTML = '<span class="thinking-indicator">Thinking...</span>';
-    }
+    assistantDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
 
     const startTime = Date.now();
     const maxTokens = clampNumber(
@@ -433,28 +509,31 @@
           const display = filter.process(delta);
           const trimmed = display.trim();
           if (trimmed && !thinkingCleared) {
-            assistantDiv.textContent = '';
+            assistantDiv.innerHTML = '';
             thinkingCleared = true;
           }
           if (thinkingCleared) {
-            assistantDiv.textContent = trimmed;
+            assistantDiv.innerHTML = renderMd(trimmed);
             dom.scrollToBottom();
           }
         } else {
-          assistantDiv.textContent = fullContent;
+          assistantDiv.innerHTML = renderMd(fullContent);
           dom.scrollToBottom();
         }
       }
 
       let cleanContent = filter ? filter.finalize() : fullContent;
       cleanContent = applyProcessors(cleanContent);
-      assistantDiv.textContent = cleanContent;
+      assistantDiv.innerHTML = renderMd(cleanContent);
+      bindCodeCopy(assistantDiv);
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       const meta = document.createElement('div');
       meta.className = 'meta';
       meta.textContent = elapsed + 's';
       assistantDiv.appendChild(meta);
+
+      addCopyButton(assistantDiv, cleanContent);
 
       messages.push({ role: 'assistant', content: cleanContent });
 
@@ -476,6 +555,40 @@
     generating = false;
     dom.send.disabled = false;
     dom.prompt.focus();
+  }
+
+  function retry() {
+    if (generating || messages.length < 2) return;
+    // Remove last assistant message if present
+    if (messages[messages.length - 1]?.role === 'assistant') {
+      messages.pop();
+      const lastChild = dom.chat.lastElementChild;
+      if (lastChild) dom.chat.removeChild(lastChild);
+    }
+    // Re-send last user message
+    if (messages[messages.length - 1]?.role === 'user') {
+      const lastUserMsg = messages.pop();
+      const lastChild = dom.chat.lastElementChild;
+      if (lastChild) dom.chat.removeChild(lastChild);
+      dom.prompt.value = lastUserMsg.content;
+      send();
+    }
+  }
+
+  function exportChat() {
+    const exportable = messages.filter(m => m.role !== 'system');
+    if (exportable.length === 0) return;
+    const text = exportable.map(m => {
+      const label = m.role === 'user' ? '## You' : '## Assistant';
+      return label + '\n\n' + m.content;
+    }).join('\n\n---\n\n');
+    const blob = new Blob([text], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chat-${id}-${new Date().toISOString().slice(0, 10)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // =========================================================================
@@ -556,9 +669,14 @@
   // Init — entry point
   // =========================================================================
   function init() {
+    // Apply saved theme before DOM build to avoid flash
+    applyTheme(storage.getTheme());
+
     dom.build();
     dom.bind();
     connection.load();
+
+    updateThemeButton();
 
     if (mode === 'developer') {
       initDeveloperMode();
@@ -592,6 +710,12 @@
       dom.prompt.style.height = Math.min(dom.prompt.scrollHeight, 200) + 'px';
     });
     dom.clear.addEventListener('click', resetChat);
+    dom.retry.addEventListener('click', retry);
+    dom.export.addEventListener('click', exportChat);
+
+    // Theme toggle
+    const themeBtn = document.querySelector('.btn-theme');
+    if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
   }
 
   if (document.readyState === 'loading') {
