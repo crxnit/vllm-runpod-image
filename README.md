@@ -16,6 +16,8 @@ Built for **linux/amd64** — build via GitHub Actions or on an OCI x86 instance
 ```
 ├── Dockerfile                          # Standard image (downloads model at boot)
 ├── Dockerfile.baked                    # Single-stage image (model weights baked in)
+├── ui/
+│   └── index.html                     # Browser-based chat UI for testing
 ├── scripts/
 │   ├── start.sh                       # Baked image entrypoint (vLLM serve)
 │   ├── pre_start.sh                   # RunPod pre-start hook
@@ -129,6 +131,21 @@ curl -H "Authorization: Bearer YOUR_API_KEY" \
   -d '{"model": "/models/weights", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 100}' \
   https://<your-runpod-url>:8000/v1/chat/completions
 ```
+
+## Test UI
+
+A browser-based chat interface is included for testing deployed models.
+
+```bash
+open ui/index.html
+```
+
+Enter your RunPod proxy URL (e.g. `https://your-pod-id-8000.proxy.runpod.net`) and API key. Features:
+
+- Streaming responses
+- Multi-turn conversation history
+- Configurable temperature and max tokens
+- Settings persisted in localStorage
 
 ## Customization
 

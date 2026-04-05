@@ -57,6 +57,10 @@ All three workflows are **manual dispatch only** (`workflow_dispatch`):
 - `VLLM_WORKER_MULTIPROC_METHOD=spawn` is set in both Dockerfiles for multi-GPU compatibility.
 - Base image is pinned to `vllm/vllm-openai:v0.11.2` (CUDA 12.8). Do not use `latest` — it requires CUDA 12.9 which RunPod drivers don't support.
 
+## Test UI
+
+`ui/index.html` is a single-file browser-based chat UI for testing models. Open it directly (`open ui/index.html`), enter the RunPod proxy URL and API key. Supports streaming responses, multi-turn conversation, configurable temperature/max tokens. Settings persist in localStorage.
+
 ## RunPod Deployment
 
 - Create a RunPod template via `runpodctl template create` with the GHCR image, port 8000/http, and `VLLM_API_KEY` env var.
