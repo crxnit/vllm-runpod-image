@@ -17,312 +17,386 @@
  *   title: 'Chat',                  // header title (optional, simple mode only)
  *   titleAccent: 'College',         // accented portion of title (optional)
  *   subtitle: '...',                // subtitle text (optional)
+ *   responseProcessors: [],         // array of (text) => text functions (optional)
  * };
  */
 
 (function () {
+  // --- Config Validation ---
+  function validateConfig(cfg) {
+    const warnings = [];
+    if (!cfg.id) warnings.push('Missing "id" — using "default". localStorage keys may collide.');
+    if (!cfg.mode) warnings.push('Missing "mode" — defaulting to "simple".');
+    if (cfg.mode === 'simple' && !cfg.systemPrompt) warnings.push('No "systemPrompt" set — model will have no persona.');
+    if (warnings.length > 0) {
+      console.warn('[chat.js] Config warnings:\n  ' + warnings.join('\n  '));
+    }
+  }
+
   const config = window.CHAT_CONFIG || {};
+  validateConfig(config);
+
   const id = config.id || 'default';
   const mode = config.mode || 'simple';
   const stripThinking = config.stripThinking !== false;
   const defaultMaxTokens = config.maxTokens || 1500;
   const defaultTemperature = config.temperature || 0.7;
+  const responseProcessors = config.responseProcessors || [];
 
-  // --- DOM Generation ---
-  function buildLayout() {
-    const container = document.getElementById('chat-app');
-    if (!container) {
-      document.body.innerHTML = '<div id="chat-app"></div>';
-    }
-    const app = document.getElementById('chat-app') || document.body;
-    app.innerHTML = '';
+  // =========================================================================
+  // Storage — reads/writes connection and settings to localStorage
+  // =========================================================================
+  const storage = {
+    _key(suffix) { return `chat-${id}-${suffix}`; },
+    getEndpoint()    { return localStorage.getItem(this._key('endpoint')) || ''; },
+    getApiKey()      { return localStorage.getItem(this._key('apikey')) || ''; },
+    getMaxTokens()   { return localStorage.getItem(this._key('max-tokens')) || String(defaultMaxTokens); },
+    getTemperature() { return localStorage.getItem(this._key('temperature')) || String(defaultTemperature); },
+    saveEndpoint(v)    { localStorage.setItem(this._key('endpoint'), v); },
+    saveApiKey(v)      { localStorage.setItem(this._key('apikey'), v); },
+    saveMaxTokens(v)   { localStorage.setItem(this._key('max-tokens'), v); },
+    saveTemperature(v) { localStorage.setItem(this._key('temperature'), v); },
+  };
 
-    if (mode === 'developer') {
-      app.innerHTML += `
-        <div class="settings">
-          <div class="field endpoint">
-            <label>Endpoint URL</label>
-            <input type="text" id="endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
-          </div>
-          <div class="field apikey">
-            <label>API Key</label>
-            <input type="password" id="apikey" placeholder="your-api-key">
-          </div>
-          <div class="field">
-            <label>Max Tokens</label>
-            <input type="number" id="max-tokens" value="${defaultMaxTokens}" min="1" max="16384" style="width:80px">
-          </div>
-          <div class="field">
-            <label>Temperature</label>
-            <input type="number" id="temperature" value="${defaultTemperature}" min="0" max="2" step="0.1" style="width:70px">
-          </div>
-          <span id="status" class="disconnected">Not connected</span>
-        </div>`;
-    } else {
-      const titleHtml = config.titleAccent
-        ? `<span class="accent">${config.titleAccent}</span> ${config.title || ''}`
-        : (config.title || 'Chat');
-      const subtitleHtml = config.subtitle
-        ? `<div class="subtitle">${config.subtitle}</div>`
-        : '';
-      app.innerHTML += `
-        <div class="header">
-          <div>
-            <h1>${titleHtml}</h1>
-            ${subtitleHtml}
-          </div>
-          <span id="status" class="disconnected">Not connected</span>
-        </div>`;
-    }
+  // =========================================================================
+  // Connection — manages endpoint, apikey, and model detection
+  // =========================================================================
+  const connection = {
+    endpoint: '',
+    apikey: '',
+    detectedModel: null,
 
-    app.innerHTML += `
-      <div class="chat" id="chat"></div>
-      <div class="starters" id="starters"></div>
-      <div class="input-area">
-        <textarea id="prompt" rows="1" placeholder="${config.placeholder || 'Type a message...'}"></textarea>
-        <button id="clear">Clear</button>
-        <button id="send">Send</button>
-      </div>`;
+    load() {
+      this.endpoint = storage.getEndpoint();
+      this.apikey = storage.getApiKey();
+    },
 
-    if (mode === 'simple') {
-      app.innerHTML += `
-        <div class="setup-overlay" id="setup-overlay">
-          <div class="setup-box">
-            <h2>Welcome!</h2>
-            <p>Enter your connection details to get started. You only need to do this once.</p>
-            <label>Endpoint URL</label>
-            <input type="text" id="setup-endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
-            <label>API Key</label>
-            <input type="password" id="setup-key" placeholder="your-api-key">
-            <button id="setup-connect-btn">Connect</button>
-          </div>
-        </div>`;
+    save() {
+      storage.saveEndpoint(this.endpoint);
+      storage.saveApiKey(this.apikey);
+    },
+
+    apiBase() {
+      if (this.endpoint.endsWith('/v1')) return this.endpoint;
+      return this.endpoint + '/v1';
+    },
+
+    modelName() {
+      return this.detectedModel || '/models/weights';
+    },
+
+    async check(onStatus) {
+      if (!this.endpoint) { onStatus('disconnected', 'Not connected'); return; }
+      onStatus('checking', 'Connecting...');
+      try {
+        const res = await fetch(this.apiBase() + '/models', {
+          headers: { 'Authorization': 'Bearer ' + this.apikey }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          this.detectedModel = data.data?.[0]?.id || null;
+          const label = mode === 'developer' ? (this.detectedModel || 'unknown') : 'Connected';
+          onStatus('connected', label);
+        } else {
+          onStatus('disconnected', 'HTTP ' + res.status);
+        }
+      } catch (e) {
+        onStatus('disconnected', 'Unreachable');
+      }
+    },
+  };
+
+  // =========================================================================
+  // SSE Parser — reads a ReadableStream and yields content deltas
+  // =========================================================================
+  async function* parseSSEStream(reader) {
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') return;
+        try {
+          const json = JSON.parse(data);
+          const delta = json.choices?.[0]?.delta?.content;
+          if (delta) yield delta;
+        } catch (e) {
+          console.debug('[chat.js] SSE parse skip:', e.message);
+        }
+      }
     }
   }
 
-  // --- Storage helpers ---
-  function storageKey(suffix) {
-    return `chat-${id}-${suffix}`;
+  // =========================================================================
+  // Thinking Filter — strips <think>...</think> tags from streaming text
+  // =========================================================================
+  function createThinkingFilter() {
+    let inThinking = false;
+    let display = '';
+
+    return {
+      process(delta) {
+        let i = 0;
+        while (i < delta.length) {
+          if (!inThinking) {
+            const start = delta.indexOf('<think>', i);
+            if (start !== -1) {
+              display += delta.slice(i, start);
+              inThinking = true;
+              i = start + 7;
+            } else {
+              display += delta.slice(i);
+              i = delta.length;
+            }
+          } else {
+            const end = delta.indexOf('</think>', i);
+            if (end !== -1) {
+              inThinking = false;
+              i = end + 8;
+            } else {
+              i = delta.length;
+            }
+          }
+        }
+        return display;
+      },
+
+      finalize(raw) {
+        return display.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      },
+    };
   }
 
-  // State
+  // =========================================================================
+  // API Client — sends chat completion requests
+  // =========================================================================
+  async function sendChatRequest(messages, maxTokens, temperature) {
+    const body = {
+      model: connection.modelName(),
+      messages: messages,
+      max_tokens: maxTokens,
+      temperature: temperature,
+      stream: true,
+    };
+
+    if (stripThinking) {
+      body.chat_template_kwargs = { enable_thinking: false };
+    }
+
+    const res = await fetch(connection.apiBase() + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + connection.apikey
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error('HTTP ' + res.status + ': ' + err);
+    }
+
+    return res.body.getReader();
+  }
+
+  // =========================================================================
+  // DOM — layout generation and element references
+  // =========================================================================
+  const dom = {
+    chat: null, prompt: null, send: null, clear: null,
+    status: null, starters: null, overlay: null,
+    endpoint: null, apikey: null, maxTokens: null, temperature: null,
+
+    build() {
+      const app = document.getElementById('chat-app') || document.body;
+      app.innerHTML = '';
+
+      if (mode === 'developer') {
+        app.innerHTML += `
+          <div class="settings">
+            <div class="field endpoint">
+              <label>Endpoint URL</label>
+              <input type="text" id="endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
+            </div>
+            <div class="field apikey">
+              <label>API Key</label>
+              <input type="password" id="apikey" placeholder="your-api-key">
+            </div>
+            <div class="field">
+              <label>Max Tokens</label>
+              <input type="number" id="max-tokens" value="${defaultMaxTokens}" min="1" max="16384" style="width:80px">
+            </div>
+            <div class="field">
+              <label>Temperature</label>
+              <input type="number" id="temperature" value="${defaultTemperature}" min="0" max="2" step="0.1" style="width:70px">
+            </div>
+            <span id="status" class="disconnected">Not connected</span>
+          </div>`;
+      } else {
+        const titleHtml = config.titleAccent
+          ? `<span class="accent">${config.titleAccent}</span> ${config.title || ''}`
+          : (config.title || 'Chat');
+        const subtitleHtml = config.subtitle
+          ? `<div class="subtitle">${config.subtitle}</div>` : '';
+        app.innerHTML += `
+          <div class="header">
+            <div>
+              <h1>${titleHtml}</h1>
+              ${subtitleHtml}
+            </div>
+            <span id="status" class="disconnected">Not connected</span>
+          </div>`;
+      }
+
+      app.innerHTML += `
+        <div class="chat" id="chat"></div>
+        <div class="starters" id="starters"></div>
+        <div class="input-area">
+          <textarea id="prompt" rows="1" placeholder="${config.placeholder || 'Type a message...'}"></textarea>
+          <button id="clear">Clear</button>
+          <button id="send">Send</button>
+        </div>`;
+
+      if (mode === 'simple') {
+        app.innerHTML += `
+          <div class="setup-overlay" id="setup-overlay">
+            <div class="setup-box">
+              <h2>Welcome!</h2>
+              <p>Enter your connection details to get started. You only need to do this once.</p>
+              <label>Endpoint URL</label>
+              <input type="text" id="setup-endpoint" placeholder="https://your-pod-id-8000.proxy.runpod.net">
+              <label>API Key</label>
+              <input type="password" id="setup-key" placeholder="your-api-key">
+              <button id="setup-connect-btn">Connect</button>
+            </div>
+          </div>`;
+      }
+    },
+
+    bind() {
+      this.chat = document.getElementById('chat');
+      this.prompt = document.getElementById('prompt');
+      this.send = document.getElementById('send');
+      this.clear = document.getElementById('clear');
+      this.status = document.getElementById('status');
+      this.starters = document.getElementById('starters');
+      this.overlay = document.getElementById('setup-overlay');
+      this.endpoint = document.getElementById('endpoint');
+      this.apikey = document.getElementById('apikey');
+      this.maxTokens = document.getElementById('max-tokens');
+      this.temperature = document.getElementById('temperature');
+    },
+
+    setStatus(cls, text) {
+      if (!this.status) return;
+      this.status.className = cls;
+      this.status.textContent = text;
+    },
+
+    addMessage(role, content) {
+      const div = document.createElement('div');
+      div.className = 'message ' + role;
+      if (content) div.textContent = content;
+      this.chat.appendChild(div);
+      this.chat.scrollTop = this.chat.scrollHeight;
+      return div;
+    },
+
+    scrollToBottom() {
+      this.chat.scrollTop = this.chat.scrollHeight;
+    },
+  };
+
+  // =========================================================================
+  // Chat Controller — orchestrates messages, sending, and UI state
+  // =========================================================================
   let messages = [];
   let generating = false;
-  let endpoint = '';
-  let apikey = '';
-  let detectedModel = null;
-
-  // DOM references (set after buildLayout)
-  let chatEl, promptEl, sendBtn, clearBtn, statusEl, startersEl, setupOverlay;
-  let endpointEl, apikeyEl, maxTokensEl, temperatureEl;
-
-  function bindElements() {
-    chatEl = document.getElementById('chat');
-    promptEl = document.getElementById('prompt');
-    sendBtn = document.getElementById('send');
-    clearBtn = document.getElementById('clear');
-    statusEl = document.getElementById('status');
-    startersEl = document.getElementById('starters');
-    setupOverlay = document.getElementById('setup-overlay');
-    endpointEl = document.getElementById('endpoint');
-    apikeyEl = document.getElementById('apikey');
-    maxTokensEl = document.getElementById('max-tokens');
-    temperatureEl = document.getElementById('temperature');
-  }
-
-  function loadConnection() {
-    endpoint = localStorage.getItem(storageKey('endpoint')) || '';
-    apikey = localStorage.getItem(storageKey('apikey')) || '';
-  }
-
-  function saveConnection() {
-    localStorage.setItem(storageKey('endpoint'), endpoint);
-    localStorage.setItem(storageKey('apikey'), apikey);
-  }
-
-  function apiBase() {
-    if (endpoint.endsWith('/v1')) return endpoint;
-    return endpoint + '/v1';
-  }
-
-  // --- Connection ---
-  async function checkConnection() {
-    if (!endpoint) { setStatus('disconnected', 'Not connected'); return; }
-    setStatus('checking', 'Connecting...');
-    try {
-      const res = await fetch(apiBase() + '/models', {
-        headers: { 'Authorization': 'Bearer ' + apikey }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        detectedModel = data.data?.[0]?.id || null;
-        setStatus('connected', mode === 'developer' ? (detectedModel || 'unknown') : 'Connected');
-      } else {
-        setStatus('disconnected', 'HTTP ' + res.status);
-      }
-    } catch (e) {
-      setStatus('disconnected', 'Unreachable');
-    }
-  }
-
-  function setStatus(cls, text) {
-    if (!statusEl) return;
-    statusEl.className = cls;
-    statusEl.textContent = text;
-  }
-
-  // --- Messages ---
-  function addMessage(role, content) {
-    const div = document.createElement('div');
-    div.className = 'message ' + role;
-    if (content) div.textContent = content;
-    chatEl.appendChild(div);
-    chatEl.scrollTop = chatEl.scrollHeight;
-    return div;
-  }
 
   function resetChat() {
     messages = [];
     if (config.systemPrompt) {
       messages.push({ role: 'system', content: config.systemPrompt });
     }
-    chatEl.innerHTML = '';
+    dom.chat.innerHTML = '';
     if (config.welcomeMessage) {
-      addMessage('assistant', config.welcomeMessage);
+      dom.addMessage('assistant', config.welcomeMessage);
     }
-    if (startersEl) {
-      startersEl.classList.remove('hidden');
+    if (dom.starters) {
+      dom.starters.classList.remove('hidden');
     }
   }
 
-  // --- Streaming ---
+  function applyProcessors(text) {
+    return responseProcessors.reduce((t, fn) => fn(t), text);
+  }
+
   async function send() {
-    const text = promptEl.value.trim();
+    const text = dom.prompt.value.trim();
     if (!text || generating) return;
 
-    if (!endpoint) {
-      if (setupOverlay) setupOverlay.classList.remove('hidden');
+    if (!connection.endpoint) {
+      if (dom.overlay) dom.overlay.classList.remove('hidden');
       return;
     }
 
-    if (startersEl) startersEl.classList.add('hidden');
+    if (dom.starters) dom.starters.classList.add('hidden');
 
     messages.push({ role: 'user', content: text });
-    addMessage('user', text);
-    promptEl.value = '';
-    promptEl.style.height = 'auto';
+    dom.addMessage('user', text);
+    dom.prompt.value = '';
+    dom.prompt.style.height = 'auto';
 
     generating = true;
-    sendBtn.disabled = true;
+    dom.send.disabled = true;
 
-    const assistantDiv = addMessage('assistant', '');
+    const assistantDiv = dom.addMessage('assistant', '');
     if (stripThinking) {
       assistantDiv.innerHTML = '<span class="thinking-indicator">Thinking...</span>';
     }
 
-    let fullContent = '';
-    let displayContent = '';
-    let inThinking = false;
-    let thinkingCleared = !stripThinking;
     const startTime = Date.now();
-
-    const maxTokens = maxTokensEl ? parseInt(maxTokensEl.value) : defaultMaxTokens;
-    const temp = temperatureEl ? parseFloat(temperatureEl.value) : defaultTemperature;
+    const maxTokens = dom.maxTokens ? parseInt(dom.maxTokens.value) : defaultMaxTokens;
+    const temp = dom.temperature ? parseFloat(dom.temperature.value) : defaultTemperature;
 
     try {
-      const body = {
-        model: detectedModel || '/models/weights',
-        messages: messages,
-        max_tokens: maxTokens,
-        temperature: temp,
-        stream: true,
-      };
+      const reader = await sendChatRequest(messages, maxTokens, temp);
+      const filter = stripThinking ? createThinkingFilter() : null;
+      let fullContent = '';
+      let thinkingCleared = !stripThinking;
 
-      if (stripThinking) {
-        body.chat_template_kwargs = { enable_thinking: false };
-      }
+      for await (const delta of parseSSEStream(reader)) {
+        fullContent += delta;
 
-      const res = await fetch(apiBase() + '/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + apikey
-        },
-        body: JSON.stringify(body)
-      });
-
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error('HTTP ' + res.status + ': ' + err);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const json = JSON.parse(data);
-            const delta = json.choices?.[0]?.delta?.content;
-            if (delta) {
-              fullContent += delta;
-
-              if (stripThinking) {
-                let i = 0;
-                while (i < delta.length) {
-                  if (!inThinking) {
-                    const thinkStart = delta.indexOf('<think>', i);
-                    if (thinkStart !== -1) {
-                      displayContent += delta.slice(i, thinkStart);
-                      inThinking = true;
-                      i = thinkStart + 7;
-                    } else {
-                      displayContent += delta.slice(i);
-                      i = delta.length;
-                    }
-                  } else {
-                    const thinkEnd = delta.indexOf('</think>', i);
-                    if (thinkEnd !== -1) {
-                      inThinking = false;
-                      i = thinkEnd + 8;
-                    } else {
-                      i = delta.length;
-                    }
-                  }
-                }
-
-                const trimmed = displayContent.trim();
-                if (trimmed && !thinkingCleared) {
-                  assistantDiv.textContent = '';
-                  thinkingCleared = true;
-                }
-                if (thinkingCleared) {
-                  assistantDiv.textContent = trimmed;
-                  chatEl.scrollTop = chatEl.scrollHeight;
-                }
-              } else {
-                assistantDiv.textContent = fullContent;
-                chatEl.scrollTop = chatEl.scrollHeight;
-              }
-            }
-          } catch (e) { /* SSE parse error — skip malformed chunk */ }
+        if (filter) {
+          const display = filter.process(delta);
+          const trimmed = display.trim();
+          if (trimmed && !thinkingCleared) {
+            assistantDiv.textContent = '';
+            thinkingCleared = true;
+          }
+          if (thinkingCleared) {
+            assistantDiv.textContent = trimmed;
+            dom.scrollToBottom();
+          }
+        } else {
+          assistantDiv.textContent = fullContent;
+          dom.scrollToBottom();
         }
       }
 
-      const cleanContent = stripThinking
-        ? displayContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
-        : fullContent;
+      let cleanContent = filter ? filter.finalize(fullContent) : fullContent;
+      cleanContent = applyProcessors(cleanContent);
       assistantDiv.textContent = cleanContent;
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -340,95 +414,109 @@
     }
 
     generating = false;
-    sendBtn.disabled = false;
-    promptEl.focus();
+    dom.send.disabled = false;
+    dom.prompt.focus();
   }
 
-  // --- Initialization ---
+  // =========================================================================
+  // Mode Initializers — separate setup paths for developer vs simple
+  // =========================================================================
+  function initDeveloperMode() {
+    if (dom.endpoint) {
+      dom.endpoint.value = connection.endpoint;
+      dom.endpoint.addEventListener('change', () => {
+        connection.endpoint = dom.endpoint.value.replace(/\/+$/, '');
+        connection.save();
+        connection.check((cls, text) => dom.setStatus(cls, text));
+      });
+    }
+    if (dom.apikey) {
+      dom.apikey.value = connection.apikey;
+      dom.apikey.addEventListener('change', () => {
+        connection.apikey = dom.apikey.value;
+        connection.save();
+        connection.check((cls, text) => dom.setStatus(cls, text));
+      });
+    }
+    if (dom.maxTokens) {
+      dom.maxTokens.value = storage.getMaxTokens();
+      dom.maxTokens.addEventListener('change', () => {
+        storage.saveMaxTokens(dom.maxTokens.value);
+      });
+    }
+    if (dom.temperature) {
+      dom.temperature.value = storage.getTemperature();
+      dom.temperature.addEventListener('change', () => {
+        storage.saveTemperature(dom.temperature.value);
+      });
+    }
+    if (connection.endpoint) {
+      connection.check((cls, text) => dom.setStatus(cls, text));
+    }
+  }
+
+  function initSimpleMode() {
+    if (connection.endpoint && connection.apikey) {
+      if (dom.overlay) dom.overlay.classList.add('hidden');
+      connection.check((cls, text) => dom.setStatus(cls, text));
+    }
+
+    const connectBtn = document.getElementById('setup-connect-btn');
+    if (connectBtn) {
+      connectBtn.addEventListener('click', () => {
+        const ep = document.getElementById('setup-endpoint');
+        const key = document.getElementById('setup-key');
+        if (!ep || !key) return;
+        connection.endpoint = ep.value.replace(/\/+$/, '');
+        connection.apikey = key.value;
+        if (!connection.endpoint || !connection.apikey) return;
+        connection.save();
+        if (dom.overlay) dom.overlay.classList.add('hidden');
+        connection.check((cls, text) => dom.setStatus(cls, text));
+      });
+    }
+  }
+
+  // =========================================================================
+  // Init — entry point
+  // =========================================================================
   function init() {
-    buildLayout();
-    bindElements();
-    loadConnection();
+    dom.build();
+    dom.bind();
+    connection.load();
 
     if (mode === 'developer') {
-      if (endpointEl) {
-        endpointEl.value = endpoint;
-        endpointEl.addEventListener('change', () => {
-          endpoint = endpointEl.value.replace(/\/+$/, '');
-          saveConnection();
-          checkConnection();
-        });
-      }
-      if (apikeyEl) {
-        apikeyEl.value = apikey;
-        apikeyEl.addEventListener('change', () => {
-          apikey = apikeyEl.value;
-          saveConnection();
-          checkConnection();
-        });
-      }
-      if (maxTokensEl) {
-        maxTokensEl.value = localStorage.getItem(storageKey('max-tokens')) || defaultMaxTokens;
-        maxTokensEl.addEventListener('change', () => {
-          localStorage.setItem(storageKey('max-tokens'), maxTokensEl.value);
-        });
-      }
-      if (temperatureEl) {
-        temperatureEl.value = localStorage.getItem(storageKey('temperature')) || defaultTemperature;
-        temperatureEl.addEventListener('change', () => {
-          localStorage.setItem(storageKey('temperature'), temperatureEl.value);
-        });
-      }
-      if (endpoint) checkConnection();
+      initDeveloperMode();
     } else {
-      if (endpoint && apikey) {
-        if (setupOverlay) setupOverlay.classList.add('hidden');
-        checkConnection();
-      }
-
-      const connectBtn = document.getElementById('setup-connect-btn');
-      if (connectBtn) {
-        connectBtn.addEventListener('click', () => {
-          const ep = document.getElementById('setup-endpoint');
-          const key = document.getElementById('setup-key');
-          if (!ep || !key) return;
-          endpoint = ep.value.replace(/\/+$/, '');
-          apikey = key.value;
-          if (!endpoint || !apikey) return;
-          saveConnection();
-          if (setupOverlay) setupOverlay.classList.add('hidden');
-          checkConnection();
-        });
-      }
+      initSimpleMode();
     }
 
     resetChat();
 
-    // Render starters with event delegation
-    if (startersEl && config.starters && config.starters.length > 0) {
-      startersEl.innerHTML = config.starters.map(
+    if (dom.starters && config.starters && config.starters.length > 0) {
+      dom.starters.innerHTML = config.starters.map(
         s => `<button class="starter-btn">${s}</button>`
       ).join('');
-      startersEl.addEventListener('click', (e) => {
+      dom.starters.addEventListener('click', (e) => {
         if (e.target.classList.contains('starter-btn')) {
-          promptEl.value = e.target.textContent;
+          dom.prompt.value = e.target.textContent;
           send();
         }
       });
     }
 
-    sendBtn.addEventListener('click', send);
-    promptEl.addEventListener('keydown', (e) => {
+    dom.send.addEventListener('click', send);
+    dom.prompt.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         send();
       }
     });
-    promptEl.addEventListener('input', () => {
-      promptEl.style.height = 'auto';
-      promptEl.style.height = Math.min(promptEl.scrollHeight, 200) + 'px';
+    dom.prompt.addEventListener('input', () => {
+      dom.prompt.style.height = 'auto';
+      dom.prompt.style.height = Math.min(dom.prompt.scrollHeight, 200) + 'px';
     });
-    clearBtn.addEventListener('click', resetChat);
+    dom.clear.addEventListener('click', resetChat);
   }
 
   if (document.readyState === 'loading') {
