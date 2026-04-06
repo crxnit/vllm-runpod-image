@@ -1,0 +1,26 @@
+services:
+  kate-advisor:
+    image: nginx:alpine
+    container_name: kate-advisor
+    volumes:
+      - ../ui:/usr/share/nginx/html:ro
+      - ./nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./proxy-config.js:/etc/nginx/proxy-config.js:ro
+    environment:
+      - VLLM_BACKEND=${VLLM_BACKEND}
+      - VLLM_API_KEY=${VLLM_API_KEY}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kate-advisor.rule=Host(`kate.jjocapps.com`)"
+      - "traefik.http.routers.kate-advisor.entrypoints=websecure"
+      - "traefik.http.routers.kate-advisor.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.kate-advisor.middlewares=kate-auth"
+      - "traefik.http.middlewares.kate-auth.basicauth.users=${TRAEFIK_BASIC_AUTH}"
+      - "traefik.http.services.kate-advisor.loadbalancer.server.port=80"
+    networks:
+      - portal-net
+    restart: unless-stopped
+
+networks:
+  portal-net:
+    external: true

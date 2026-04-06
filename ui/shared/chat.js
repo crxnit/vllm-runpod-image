@@ -42,6 +42,8 @@
   const defaultMaxTokens = config.maxTokens || 1500;
   const defaultTemperature = config.temperature || 0.7;
   const responseProcessors = config.responseProcessors || [];
+  const preconfiguredEndpoint = config.endpoint || '';
+  const preconfiguredApiKey = config.apikey || '';
 
   // =========================================================================
   // Utilities
@@ -132,8 +134,8 @@
     detectedModel: null,
 
     load() {
-      this.endpoint = storage.getEndpoint();
-      this.apikey = storage.getApiKey();
+      this.endpoint = storage.getEndpoint() || preconfiguredEndpoint;
+      this.apikey = storage.getApiKey() || preconfiguredApiKey;
     },
 
     save() {
@@ -454,6 +456,9 @@
       navigator.clipboard.writeText(rawContent).then(() => {
         btn.textContent = 'Copied!';
         setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      }).catch(() => {
+        btn.textContent = 'Failed';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
       });
     });
     div.appendChild(btn);
@@ -600,7 +605,13 @@
       dom.endpoint.addEventListener('change', () => {
         const val = dom.endpoint.value.replace(/\/+$/, '');
         if (val) {
-          try { new URL(val); } catch (e) {
+          try {
+            const parsed = new URL(val);
+            if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+              dom.setStatus('disconnected', 'Use HTTPS');
+              return;
+            }
+          } catch (e) {
             dom.setStatus('disconnected', 'Invalid URL');
             return;
           }
@@ -636,7 +647,7 @@
   }
 
   function initSimpleMode() {
-    if (connection.endpoint && connection.apikey) {
+    if (connection.endpoint && (connection.apikey || preconfiguredEndpoint)) {
       if (dom.overlay) dom.overlay.classList.add('hidden');
       connection.check((cls, text) => dom.setStatus(cls, text));
     }
@@ -650,7 +661,11 @@
         const epVal = ep.value.replace(/\/+$/, '');
         if (!epVal || !key.value) return;
         try {
-          new URL(epVal);
+          const parsed = new URL(epVal);
+          if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+            ep.style.borderColor = '#f87171';
+            return;
+          }
         } catch (e) {
           ep.style.borderColor = '#f87171';
           return;

@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 try:
-    from openai import OpenAI
+    from openai import OpenAI, OpenAIError
 except ImportError:
     print("Missing dependency. Install with: pip install openai")
     sys.exit(1)
@@ -50,27 +50,42 @@ READ_FILE_PATTERN = re.compile(
 )
 
 AGENT_INSTRUCTIONS = """\
-You can perform actions in the user's workspace using these tags:
+IMPORTANT: You have tools to interact with the user's workspace. You MUST use them — never ask the user to paste file contents.
 
-To write or create a file:
+Tools (use these XML tags in your responses):
+
+1. Read a file:
+<read_file path="relative/path.py"/>
+
+2. Write or create a file:
 <write_file path="relative/path.py">
 file contents here
 </write_file>
 
-To read a file into context:
-<read_file path="relative/path.py"/>
-
-To run a shell command:
+3. Run a shell command:
 <run_command>command here</run_command>
 
 Rules:
-- Always use these tags when the user asks you to create, edit, or write files.
-- Always use these tags when you need to read a file to answer a question.
-- Always use these tags when the user asks you to run a command.
-- Write complete file contents, not partial snippets.
+- ALWAYS use <read_file> to read files yourself. NEVER ask the user to provide file contents.
+- ALWAYS use <write_file> to create or edit files. Write complete file contents, not partial snippets.
+- ALWAYS use <run_command> to run commands.
 - The user will be asked to approve each action before it executes.
 - You can include multiple actions in a single response.
-- Prefer relative paths from the working directory.
+- Use relative paths from the working directory.
+
+Example — if the user says "review main.py", respond like this:
+I'll read main.py and review it for you.
+<read_file path="main.py"/>
+
+Example — if the user says "create a hello world script", respond like this:
+I'll create that for you.
+<write_file path="hello.py">
+print("Hello, world!")
+</write_file>
+
+Example — if the user says "what Python version is installed", respond like this:
+Let me check.
+<run_command>python3 --version</run_command>
 """
 
 
@@ -138,8 +153,15 @@ def resolve_path(path_str):
     return p.resolve()
 
 
+SAFE_PATH_PATTERN = re.compile(r'^[\w./\-]+$')
+
+
 def safe_resolve_path(path_str):
     """Resolve path and verify it's within CWD to prevent traversal."""
+    if not path_str or not SAFE_PATH_PATTERN.match(path_str):
+        return None, f"Invalid path characters: {path_str!r}"
+    if '\x00' in path_str:
+        return None, f"Null byte in path: {path_str!r}"
     p = resolve_path(path_str)
     try:
         p.relative_to(CWD)
@@ -294,9 +316,12 @@ def process_actions(response, messages, auto_approve=False):
             print(f"  {RED}{info}{RESET}\n")
             actions_taken.append(f"Failed to read {filepath}: {info}")
 
-    # Process shell commands
+    # Process shell commands — always require confirmation (never auto-approve)
+    # because a denylist cannot reliably block all dangerous commands from an LLM.
     for match in RUN_CMD_PATTERN.finditer(response):
         cmd = match.group(1).strip()
+        if not cmd:
+            continue
         print(f"{MAGENTA}Action: run `{cmd}`{RESET}")
 
         if DANGEROUS_PATTERNS.search(cmd):
@@ -304,7 +329,7 @@ def process_actions(response, messages, auto_approve=False):
             actions_taken.append(f"Blocked dangerous command: `{cmd}`")
             continue
 
-        if auto_approve or confirm("Run this command?"):
+        if confirm("Run this command?"):
             output = run_shell(cmd)
             print(f"  {DIM}{output}{RESET}\n")
             # Feed output back to conversation
@@ -468,10 +493,12 @@ def stream_response(client, messages, config):
         full_response = ""
 
         for chunk in stream:
-            delta = chunk.choices[0].delta.content
-            if delta:
-                print(delta, end="", flush=True)
-                full_response += delta
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                print(delta.content, end="", flush=True)
+                full_response += delta.content
 
         print("\n")
         return full_response
@@ -479,11 +506,11 @@ def stream_response(client, messages, config):
     except KeyboardInterrupt:
         print(f"\n{DIM}(cancelled){RESET}\n")
         return None
-    except ConnectionError as e:
-        print(f"\n{RED}Connection error: {e}{RESET}\n")
+    except OpenAIError as e:
+        print(f"\n{RED}API error: {e}{RESET}\n")
         return None
-    except Exception as e:
-        print(f"\n{RED}Error ({type(e).__name__}): {e}{RESET}\n")
+    except (ConnectionError, TimeoutError, OSError) as e:
+        print(f"\n{RED}Connection error: {e}{RESET}\n")
         return None
 
 
@@ -556,7 +583,7 @@ def main():
                 model_id = models.data[0].id if models.data else "unknown"
                 print(f"{DIM}Connected to {endpoint}{RESET}")
                 print(f"{DIM}Model: {model_id}{RESET}")
-            except Exception as e:
+            except (OpenAIError, ConnectionError, TimeoutError, OSError) as e:
                 print(f"{YELLOW}Warning: could not connect to {endpoint}: {e}{RESET}")
     else:
         print(f"{YELLOW}No endpoint configured. Use /endpoint URL to set one.{RESET}")
@@ -695,7 +722,7 @@ def main():
                                 size = format_size(e.stat().st_size)
                                 print(f"  {e.name}  {DIM}({size}){RESET}")
                         print()
-                    except Exception as ex:
+                    except (OSError, PermissionError) as ex:
                         print(f"{RED}Error: {ex}{RESET}\n")
             elif cmd == "/tree":
                 target = resolve_path(arg) if arg else CWD

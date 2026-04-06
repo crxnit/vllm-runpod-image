@@ -1,0 +1,52 @@
+server {
+    listen 80;
+    server_name kate.jjocapps.com;
+
+    root /usr/share/nginx/html;
+    index college-advisor.html;
+
+    # Security headers
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Inject proxy-config.js into HTML pages so the UI uses the backend proxy
+    # instead of requiring users to enter a RunPod URL and API key.
+    sub_filter '</head>' '<script src="/proxy-config.js"></script></head>';
+    sub_filter_once on;
+    sub_filter_types text/html;
+
+    # Serve college-advisor.html as the default page
+    location = / {
+        try_files /college-advisor.html =404;
+    }
+
+    # Serve proxy-config.js from deploy directory
+    location = /proxy-config.js {
+        alias /etc/nginx/proxy-config.js;
+    }
+
+    # Serve static UI files (shared/, etc.)
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # Reverse proxy to vLLM backend — injects API key server-side
+    location /api/ {
+        # Strip /api prefix: /api/v1/models -> /v1/models
+        rewrite ^/api(/.*)$ $1 break;
+
+        proxy_pass ${VLLM_BACKEND};
+        proxy_set_header Host $proxy_host;
+        proxy_set_header Authorization "Bearer ${VLLM_API_KEY}";
+        proxy_set_header Content-Type $http_content_type;
+
+        # SSE streaming support
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 120s;
+        proxy_http_version 1.1;
+        proxy_set_header Connection '';
+        chunked_transfer_encoding off;
+    }
+}

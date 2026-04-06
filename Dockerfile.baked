@@ -19,7 +19,9 @@ ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
 ARG MODEL=Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
 ARG HF_TOKEN=""
 RUN if [ -n "$HF_TOKEN" ]; then export HF_TOKEN="$HF_TOKEN"; fi && \
-    python3 -c "from huggingface_hub import snapshot_download; snapshot_download('${MODEL}', local_dir='/models/weights')"
+    python3 -c "import sys, re; from huggingface_hub import snapshot_download; \
+    m = sys.argv[1]; assert re.match(r'^[A-Za-z0-9._/-]+$', m), f'Invalid model name: {m}'; \
+    snapshot_download(m, local_dir='/models/weights')" "${MODEL}"
 
 COPY scripts/pre_start.sh /pre_start.sh
 COPY scripts/post_start.sh /post_start.sh

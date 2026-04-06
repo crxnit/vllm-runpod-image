@@ -139,6 +139,9 @@
         navigator.clipboard.writeText(code.textContent).then(() => {
           btn.textContent = 'Copied!';
           setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+        }).catch(() => {
+          btn.textContent = 'Failed';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
         });
       });
     });
