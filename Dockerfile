@@ -1,7 +1,7 @@
 FROM vllm/vllm-openai:v0.11.2
 
-# Install additional dependencies
-RUN pip install --no-cache-dir huggingface_hub tiktoken
+# NOTE: shared base setup with Dockerfile.baked — keep in sync
+RUN pip install --no-cache-dir "huggingface_hub[cli,hf_xet]" tiktoken
 
 # Set environment
 ENV HF_HOME=/root/.cache/huggingface

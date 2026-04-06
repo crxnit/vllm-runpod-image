@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+from common import BOLD, RESET
+
 # Match vLLM engine stats lines like:
 # Engine 000: Avg prompt throughput: 3.5 tokens/s, Avg generation throughput: 8.5 tokens/s,
 # Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.0%
@@ -90,11 +92,11 @@ def print_summary(engine_stats, requests):
     active_gen = [t for t in gen_tps if t > 0]
     active_prompt = [t for t in prompt_tps if t > 0]
 
-    print(f"\n\033[1mLog Summary\033[0m")
+    print(f"\n{BOLD}Log Summary{RESET}")
     print(f"  Engine stat entries:  {len(engine_stats)}")
     print(f"  HTTP requests:        {len(requests)}")
     print()
-    print(f"\033[1mGeneration Throughput (tokens/s)\033[0m")
+    print(f"{BOLD}Generation Throughput (tokens/s){RESET}")
     if active_gen:
         print(f"  Avg:  {sum(active_gen) / len(active_gen):.1f}")
         print(f"  Max:  {max(active_gen):.1f}")
@@ -102,7 +104,7 @@ def print_summary(engine_stats, requests):
     else:
         print(f"  No active generation periods found.")
     print()
-    print(f"\033[1mPrompt Throughput (tokens/s)\033[0m")
+    print(f"{BOLD}Prompt Throughput (tokens/s){RESET}")
     if active_prompt:
         print(f"  Avg:  {sum(active_prompt) / len(active_prompt):.1f}")
         print(f"  Max:  {max(active_prompt):.1f}")
@@ -110,11 +112,11 @@ def print_summary(engine_stats, requests):
     else:
         print(f"  No active prompt periods found.")
     print()
-    print(f"\033[1mGPU KV Cache Usage (%)\033[0m")
+    print(f"{BOLD}GPU KV Cache Usage (%){RESET}")
     print(f"  Avg:  {sum(kv) / len(kv):.1f}")
     print(f"  Max:  {max(kv):.1f}")
     print()
-    print(f"\033[1mConcurrency\033[0m")
+    print(f"{BOLD}Concurrency{RESET}")
     print(f"  Max running:  {max(running)}")
     print(f"  Max waiting:  {max(waiting)}")
     print()

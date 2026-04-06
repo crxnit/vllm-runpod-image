@@ -6,7 +6,6 @@ import asyncio
 import json
 import time
 import sys
-from pathlib import Path
 
 try:
     import aiohttp
@@ -14,16 +13,7 @@ except ImportError:
     print("Missing dependency. Install with: pip install aiohttp")
     sys.exit(1)
 
-CONFIG_PATH = Path.home() / ".config" / "vllm-chat" / "config.json"
-
-# ANSI colors
-BOLD = "\033[1m"
-DIM = "\033[2m"
-CYAN = "\033[36m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RED = "\033[31m"
-RESET = "\033[0m"
+from common import BOLD, DIM, CYAN, GREEN, YELLOW, RED, RESET, load_config
 
 TEST_PROMPTS = [
     "Write a Python function that checks if a string is a palindrome.",
@@ -47,16 +37,6 @@ TEST_PROMPTS = [
     "Write a binary search implementation in Python.",
     "What is dependency injection and why is it useful?",
 ]
-
-
-def load_config():
-    if CONFIG_PATH.exists():
-        try:
-            return json.loads(CONFIG_PATH.read_text())
-        except (json.JSONDecodeError, OSError) as e:
-            print(f"{YELLOW}Warning: corrupt config file: {e}{RESET}")
-            return {}
-    return {}
 
 
 async def send_request(session, url, headers, payload, request_id):

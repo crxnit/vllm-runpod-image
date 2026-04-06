@@ -8,9 +8,7 @@
  */
 
 (function () {
-  function escapeHtml(str) {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+  var escapeHtml = window.escapeHtml;
 
   // Inline markdown: bold, italic, inline code, links
   function renderInline(text) {
@@ -136,13 +134,7 @@
       btn.addEventListener('click', () => {
         const code = btn.closest('pre')?.querySelector('code');
         if (!code) return;
-        navigator.clipboard.writeText(code.textContent).then(() => {
-          btn.textContent = 'Copied!';
-          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-        }).catch(() => {
-          btn.textContent = 'Failed';
-          setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
-        });
+        window.copyToClipboard(code.textContent, btn);
       });
     });
   };

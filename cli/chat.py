@@ -3,8 +3,6 @@
 
 import argparse
 import fnmatch
-import json
-import os
 import re
 import subprocess
 import sys
@@ -16,17 +14,10 @@ except ImportError:
     print("Missing dependency. Install with: pip install openai")
     sys.exit(1)
 
-CONFIG_PATH = Path.home() / ".config" / "vllm-chat" / "config.json"
-
-# ANSI colors
-BOLD = "\033[1m"
-DIM = "\033[2m"
-CYAN = "\033[36m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RED = "\033[31m"
-MAGENTA = "\033[35m"
-RESET = "\033[0m"
+from common import (
+    CONFIG_PATH, BOLD, DIM, CYAN, GREEN, YELLOW, RED, MAGENTA, RESET,
+    load_config, save_config,
+)
 
 # Files/dirs to ignore when listing
 IGNORE_PATTERNS = [
@@ -89,24 +80,9 @@ Let me check.
 """
 
 
-def load_config():
-    if CONFIG_PATH.exists():
-        try:
-            return json.loads(CONFIG_PATH.read_text())
-        except (json.JSONDecodeError, OSError) as e:
-            print(f"{YELLOW}Warning: corrupt config file, starting fresh: {e}{RESET}")
-            return {}
-    return {}
-
-
-def save_config(config):
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(config, indent=2))
-    try:
-        CONFIG_PATH.chmod(0o600)
-    except OSError:
-        pass
-
+# =========================================================================
+# Filesystem helpers
+# =========================================================================
 
 def should_ignore(name):
     for pattern in IGNORE_PATTERNS:
@@ -202,6 +178,10 @@ def write_file(path_str, content):
         return False, f"Error writing {path}: {e}"
 
 
+# =========================================================================
+# Shell execution
+# =========================================================================
+
 DANGEROUS_PATTERNS = re.compile(
     r"rm\s+-rf\s+/|mkfs|dd\s+if=|:(){ :|chmod\s+-R\s+777\s+/|>\s*/dev/sd",
     re.IGNORECASE,
@@ -210,7 +190,7 @@ DANGEROUS_PATTERNS = re.compile(
 
 def run_shell(cmd):
     if DANGEROUS_PATTERNS.search(cmd):
-        return f"(blocked: command matched a dangerous pattern)"
+        return "(blocked: command matched a dangerous pattern)"
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True,
@@ -240,7 +220,6 @@ def confirm(prompt):
     try:
         flush_stdin()
         answer = input(f"{YELLOW}{prompt} [Y/n]{RESET} ").strip().lower()
-        # Default to yes on empty input
         if answer == "":
             return True
         return answer in ("y", "yes")
@@ -249,117 +228,18 @@ def confirm(prompt):
         return False
 
 
-def process_actions(response, messages, auto_approve=False):
-    """Parse and execute autonomous actions from model response."""
-    actions_taken = []
+# =========================================================================
+# Workspace context (gathered once, passed to prompt builder)
+# =========================================================================
 
-    # Process file writes
-    for match in WRITE_FILE_PATTERN.finditer(response):
-        filepath = match.group(1)
-        content = match.group(2).strip()
+def gather_workspace_context():
+    """Collect workspace data (git branch, file listing) — side effects isolated here."""
+    context = {"cwd": str(CWD)}
 
-        # Validate path is within workspace
-        _, path_err = safe_resolve_path(filepath)
-        if path_err:
-            print(f"  {RED}Blocked: {path_err}{RESET}\n")
-            actions_taken.append(f"Blocked write outside workspace: {filepath}")
-            continue
-
-        # Show preview
-        lines = content.count("\n") + 1
-        print(f"{MAGENTA}Action: write {filepath} ({lines} lines){RESET}")
-
-        # Show first/last few lines
-        content_lines = content.split("\n")
-        if len(content_lines) <= 10:
-            for line in content_lines:
-                print(f"  {DIM}{line}{RESET}")
-        else:
-            for line in content_lines[:5]:
-                print(f"  {DIM}{line}{RESET}")
-            print(f"  {DIM}... ({len(content_lines) - 10} more lines) ...{RESET}")
-            for line in content_lines[-5:]:
-                print(f"  {DIM}{line}{RESET}")
-
-        if auto_approve or confirm("Write this file?"):
-            ok, info = write_file(filepath, content + "\n")
-            if ok:
-                print(f"  {GREEN}Wrote {info}{RESET}\n")
-                actions_taken.append(f"Wrote {info}")
-            else:
-                print(f"  {RED}{info}{RESET}\n")
-                actions_taken.append(f"Failed to write {filepath}: {info}")
-        else:
-            print(f"  {DIM}Skipped.{RESET}\n")
-            actions_taken.append(f"User skipped writing {filepath}")
-
-    # Process file reads
-    for match in READ_FILE_PATTERN.finditer(response):
-        filepath = match.group(1)
-
-        # Validate path is within workspace
-        _, path_err = safe_resolve_path(filepath)
-        if path_err:
-            print(f"  {RED}Blocked: {path_err}{RESET}\n")
-            actions_taken.append(f"Blocked read outside workspace: {filepath}")
-            continue
-
-        print(f"{MAGENTA}Action: read {filepath}{RESET}")
-        content, info = read_file(filepath)
-        if content:
-            lines = content.count("\n") + 1
-            print(f"  {DIM}Read {info} ({lines} lines){RESET}\n")
-            file_msg = f"Contents of {info}:\n```\n{content}\n```"
-            messages.append({"role": "user", "content": file_msg})
-            actions_taken.append(f"Read {info}")
-        else:
-            print(f"  {RED}{info}{RESET}\n")
-            actions_taken.append(f"Failed to read {filepath}: {info}")
-
-    # Process shell commands — always require confirmation (never auto-approve)
-    # because a denylist cannot reliably block all dangerous commands from an LLM.
-    for match in RUN_CMD_PATTERN.finditer(response):
-        cmd = match.group(1).strip()
-        if not cmd:
-            continue
-        print(f"{MAGENTA}Action: run `{cmd}`{RESET}")
-
-        if DANGEROUS_PATTERNS.search(cmd):
-            print(f"  {RED}Blocked: command matched a dangerous pattern.{RESET}\n")
-            actions_taken.append(f"Blocked dangerous command: `{cmd}`")
-            continue
-
-        if confirm("Run this command?"):
-            output = run_shell(cmd)
-            print(f"  {DIM}{output}{RESET}\n")
-            # Feed output back to conversation
-            messages.append({"role": "user", "content": f"Command output for `{cmd}`:\n```\n{output}\n```"})
-            actions_taken.append(f"Ran `{cmd}`")
-        else:
-            print(f"  {DIM}Skipped.{RESET}\n")
-            actions_taken.append(f"User skipped running `{cmd}`")
-
-    return actions_taken
-
-
-def build_system_prompt(config):
-    parts = []
-
-    # User-defined system prompt
-    user_system = config.get("system", "")
-    if user_system:
-        parts.append(user_system)
-
-    # Workspace context
-    parts.append(f"Working directory: {CWD}")
-
-    # Check for git repo
     git_dir = CWD / ".git"
     if git_dir.exists():
-        branch = run_shell("git branch --show-current")
-        parts.append(f"Git branch: {branch}")
+        context["git_branch"] = run_shell("git branch --show-current")
 
-    # Top-level file listing
     try:
         entries = sorted(CWD.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
         entries = [e for e in entries if not should_ignore(e.name)]
@@ -368,9 +248,27 @@ def build_system_prompt(config):
         )
         if len(entries) > 30:
             listing += f", ... ({len(entries) - 30} more)"
-        parts.append(f"Files: {listing}")
+        context["files"] = listing
     except (OSError, PermissionError) as e:
-        parts.append(f"Files: (unable to list: {e})")
+        context["files"] = f"(unable to list: {e})"
+
+    return context
+
+
+def build_system_prompt(config, workspace):
+    """Pure function: assemble system prompt from config and pre-gathered workspace context."""
+    parts = []
+
+    user_system = config.get("system", "")
+    if user_system:
+        parts.append(user_system)
+
+    parts.append(f"Working directory: {workspace['cwd']}")
+
+    if "git_branch" in workspace:
+        parts.append(f"Git branch: {workspace['git_branch']}")
+
+    parts.append(f"Files: {workspace['files']}")
 
     parts.append(
         "You have access to the user's working directory. "
@@ -379,11 +277,122 @@ def build_system_prompt(config):
         "When writing code, be precise and match the existing style."
     )
 
-    # Agent instructions
     parts.append(AGENT_INSTRUCTIONS)
 
     return "\n\n".join(parts)
 
+
+# =========================================================================
+# Action handlers (each handles one type of autonomous action)
+# =========================================================================
+
+def validate_action_path(filepath):
+    """Validate path for an action. Prints error and returns error string, or None if valid."""
+    _, path_err = safe_resolve_path(filepath)
+    if path_err:
+        print(f"  {RED}Blocked: {path_err}{RESET}\n")
+    return path_err
+
+
+def handle_write_action(match, messages, auto_approve):
+    """Handle a single <write_file> action."""
+    filepath = match.group(1)
+    content = match.group(2).strip()
+
+    if validate_action_path(filepath):
+        return f"Blocked write outside workspace: {filepath}"
+
+    lines = content.count("\n") + 1
+    print(f"{MAGENTA}Action: write {filepath} ({lines} lines){RESET}")
+
+    content_lines = content.split("\n")
+    if len(content_lines) <= 10:
+        for line in content_lines:
+            print(f"  {DIM}{line}{RESET}")
+    else:
+        for line in content_lines[:5]:
+            print(f"  {DIM}{line}{RESET}")
+        print(f"  {DIM}... ({len(content_lines) - 10} more lines) ...{RESET}")
+        for line in content_lines[-5:]:
+            print(f"  {DIM}{line}{RESET}")
+
+    if auto_approve or confirm("Write this file?"):
+        ok, info = write_file(filepath, content + "\n")
+        if ok:
+            print(f"  {GREEN}Wrote {info}{RESET}\n")
+            return f"Wrote {info}"
+        else:
+            print(f"  {RED}{info}{RESET}\n")
+            return f"Failed to write {filepath}: {info}"
+    else:
+        print(f"  {DIM}Skipped.{RESET}\n")
+        return f"User skipped writing {filepath}"
+
+
+def handle_read_action(match, messages, auto_approve):
+    """Handle a single <read_file> action."""
+    filepath = match.group(1)
+
+    if validate_action_path(filepath):
+        return f"Blocked read outside workspace: {filepath}"
+
+    print(f"{MAGENTA}Action: read {filepath}{RESET}")
+    content, info = read_file(filepath)
+    if content:
+        lines = content.count("\n") + 1
+        print(f"  {DIM}Read {info} ({lines} lines){RESET}\n")
+        file_msg = f"Contents of {info}:\n```\n{content}\n```"
+        messages.append({"role": "user", "content": file_msg})
+        return f"Read {info}"
+    else:
+        print(f"  {RED}{info}{RESET}\n")
+        return f"Failed to read {filepath}: {info}"
+
+
+def handle_run_action(match, messages, auto_approve):
+    """Handle a single <run_command> action. Always requires confirmation."""
+    cmd = match.group(1).strip()
+    if not cmd:
+        return None
+
+    print(f"{MAGENTA}Action: run `{cmd}`{RESET}")
+
+    if DANGEROUS_PATTERNS.search(cmd):
+        print(f"  {RED}Blocked: command matched a dangerous pattern.{RESET}\n")
+        return f"Blocked dangerous command: `{cmd}`"
+
+    if confirm("Run this command?"):
+        output = run_shell(cmd)
+        print(f"  {DIM}{output}{RESET}\n")
+        messages.append({"role": "user", "content": f"Command output for `{cmd}`:\n```\n{output}\n```"})
+        return f"Ran `{cmd}`"
+    else:
+        print(f"  {DIM}Skipped.{RESET}\n")
+        return f"User skipped running `{cmd}`"
+
+
+# Action registry: (pattern, handler)
+ACTION_HANDLERS = [
+    (WRITE_FILE_PATTERN, handle_write_action),
+    (READ_FILE_PATTERN, handle_read_action),
+    (RUN_CMD_PATTERN, handle_run_action),
+]
+
+
+def process_actions(response, messages, auto_approve=False):
+    """Parse and execute autonomous actions from model response."""
+    actions_taken = []
+    for pattern, handler in ACTION_HANDLERS:
+        for match in pattern.finditer(response):
+            result = handler(match, messages, auto_approve)
+            if result:
+                actions_taken.append(result)
+    return actions_taken
+
+
+# =========================================================================
+# File context injection
+# =========================================================================
 
 def inject_file_context(text):
     if "@" not in text:
@@ -410,7 +419,108 @@ def inject_file_context(text):
     return "\n".join(context_parts), files_added
 
 
-def print_help():
+# =========================================================================
+# API client abstraction
+# =========================================================================
+
+class ChatClient:
+    """Abstract chat completions client."""
+    def stream(self, messages, model, max_tokens, temperature):
+        raise NotImplementedError
+
+    def list_models(self):
+        raise NotImplementedError
+
+
+class OpenAIChatClient(ChatClient):
+    """Chat client backed by the OpenAI SDK."""
+    def __init__(self, endpoint, api_key):
+        self._client = OpenAI(
+            base_url=endpoint.rstrip("/") + "/v1",
+            api_key=api_key or "no-key",
+        )
+
+    def stream(self, messages, model, max_tokens, temperature):
+        return self._client.chat.completions.create(
+            model=model, messages=messages,
+            max_tokens=max_tokens, temperature=temperature,
+            stream=True,
+        )
+
+    def list_models(self):
+        return self._client.models.list()
+
+
+def get_client(config):
+    endpoint = config.get("endpoint", "").rstrip("/")
+    if not endpoint:
+        print(f"{RED}No endpoint set. Use /endpoint URL{RESET}")
+        return None
+    return OpenAIChatClient(endpoint, config.get("key", "no-key"))
+
+
+def stream_response(client, messages, config):
+    try:
+        stream = client.stream(
+            messages,
+            model=config.get("model", "/models/weights"),
+            max_tokens=config.get("max_tokens", 1024),
+            temperature=config.get("temperature", 0.7),
+        )
+
+        print(f"\n{GREEN}assistant{RESET}: ", end="", flush=True)
+        full_response = ""
+
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                print(delta.content, end="", flush=True)
+                full_response += delta.content
+
+        print("\n")
+        return full_response
+
+    except KeyboardInterrupt:
+        print(f"\n{DIM}(cancelled){RESET}\n")
+        return None
+    except OpenAIError as e:
+        print(f"\n{RED}API error: {e}{RESET}\n")
+        return None
+    except (ConnectionError, TimeoutError, OSError) as e:
+        print(f"\n{RED}Connection error: {e}{RESET}\n")
+        return None
+
+
+# =========================================================================
+# Chat context — mutable state for the REPL session
+# =========================================================================
+
+class ChatContext:
+    """Holds mutable state for the chat session."""
+    def __init__(self, config, messages):
+        self.config = config
+        self.messages = messages
+        self.last_response = None
+        self.auto_approve = config.get("auto_approve", False)
+
+    def rebuild_system_prompt(self):
+        workspace = gather_workspace_context()
+        self.messages = [m for m in self.messages if m["role"] != "system"]
+        self.messages.insert(0, {"role": "system", "content": build_system_prompt(self.config, workspace)})
+
+
+# =========================================================================
+# Command handlers (each returns 'quit' to exit, or None to continue)
+# =========================================================================
+
+def cmd_quit(arg, ctx):
+    print(f"{DIM}Goodbye!{RESET}")
+    return "quit"
+
+
+def cmd_help(arg, ctx):
     print(f"""
 {BOLD}Chat Commands:{RESET}
   {CYAN}/help{RESET}              Show this help
@@ -449,15 +559,22 @@ Press Ctrl+C to cancel a response.{RESET}
 """)
 
 
-def print_config(config):
+def cmd_clear(arg, ctx):
+    ctx.rebuild_system_prompt()
+    ctx.last_response = None
+    print(f"{DIM}Conversation cleared.{RESET}\n")
+
+
+def cmd_config(arg, ctx):
+    c = ctx.config
     print(f"\n{BOLD}Configuration:{RESET}")
-    print(f"  Endpoint:    {config.get('endpoint', DIM + 'not set' + RESET)}")
-    print(f"  API Key:     {DIM}{'*' * 8 + config['key'][-4:] if config.get('key') else 'not set'}{RESET}")
-    print(f"  Model:       {config.get('model', '/models/weights')}")
-    print(f"  Temperature: {config.get('temperature', 0.7)}")
-    print(f"  Max Tokens:  {config.get('max_tokens', 1024)}")
-    print(f"  System:      {config.get('system', DIM + 'none' + RESET)}")
-    print(f"  Auto-approve:{YELLOW} {'ON' if config.get('auto_approve') else 'OFF'}{RESET}")
+    print(f"  Endpoint:    {c.get('endpoint', DIM + 'not set' + RESET)}")
+    print(f"  API Key:     {DIM}{'*' * 8 + c['key'][-4:] if c.get('key') else 'not set'}{RESET}")
+    print(f"  Model:       {c.get('model', '/models/weights')}")
+    print(f"  Temperature: {c.get('temperature', 0.7)}")
+    print(f"  Max Tokens:  {c.get('max_tokens', 1024)}")
+    print(f"  System:      {c.get('system', DIM + 'none' + RESET)}")
+    print(f"  Auto-approve:{YELLOW} {'ON' if ctx.auto_approve else 'OFF'}{RESET}")
     print(f"  Config file: {DIM}{CONFIG_PATH}{RESET}")
     print(f"\n{BOLD}Workspace:{RESET}")
     print(f"  Directory:   {CWD}")
@@ -468,51 +585,218 @@ def print_config(config):
     print()
 
 
-def get_client(config):
-    endpoint = config.get("endpoint", "").rstrip("/")
-    if not endpoint:
-        print(f"{RED}No endpoint set. Use /endpoint URL{RESET}")
-        return None
-    return OpenAI(
-        base_url=endpoint + "/v1",
-        api_key=config.get("key", "no-key"),
-    )
+def cmd_auto(arg, ctx):
+    ctx.auto_approve = not ctx.auto_approve
+    ctx.config["auto_approve"] = ctx.auto_approve
+    save_config(ctx.config)
+    state = f"{GREEN}ON{RESET}" if ctx.auto_approve else f"{RED}OFF{RESET}"
+    print(f"{DIM}Auto-approve: {state}\n")
 
 
-def stream_response(client, messages, config):
-    try:
-        stream = client.chat.completions.create(
-            model=config.get("model", "/models/weights"),
-            messages=messages,
-            max_tokens=config.get("max_tokens", 1024),
-            temperature=config.get("temperature", 0.7),
-            stream=True,
-        )
+def cmd_endpoint(arg, ctx):
+    if arg:
+        ctx.config["endpoint"] = arg.rstrip("/")
+        save_config(ctx.config)
+        print(f"{DIM}Endpoint set to {ctx.config['endpoint']}{RESET}\n")
+    else:
+        print(f"Endpoint: {ctx.config.get('endpoint', 'not set')}\n")
 
-        print(f"\n{GREEN}assistant{RESET}: ", end="", flush=True)
-        full_response = ""
 
-        for chunk in stream:
-            if not chunk.choices:
+def cmd_key(arg, ctx):
+    if arg:
+        ctx.config["key"] = arg
+        save_config(ctx.config)
+        print(f"{DIM}API key updated.{RESET}\n")
+    else:
+        c = ctx.config
+        print(f"API key: {'*' * 8 + c['key'][-4:] if c.get('key') else 'not set'}\n")
+
+
+def cmd_model(arg, ctx):
+    if arg:
+        ctx.config["model"] = arg
+        save_config(ctx.config)
+        print(f"{DIM}Model set to {arg}{RESET}\n")
+    else:
+        print(f"Model: {ctx.config.get('model', '/models/weights')}\n")
+
+
+def cmd_temp(arg, ctx):
+    if arg:
+        try:
+            val = float(arg)
+            if not 0 <= val <= 2:
+                print(f"{RED}Temperature must be between 0 and 2.{RESET}\n")
+            else:
+                ctx.config["temperature"] = val
+                save_config(ctx.config)
+                print(f"{DIM}Temperature set to {val}{RESET}\n")
+        except ValueError:
+            print(f"{RED}Invalid temperature value.{RESET}\n")
+    else:
+        print(f"Temperature: {ctx.config.get('temperature', 0.7)}\n")
+
+
+def cmd_max(arg, ctx):
+    if arg:
+        try:
+            val = int(arg)
+            if val < 1 or val > 16384:
+                print(f"{RED}Max tokens must be between 1 and 16384.{RESET}\n")
+            else:
+                ctx.config["max_tokens"] = val
+                save_config(ctx.config)
+                print(f"{DIM}Max tokens set to {val}{RESET}\n")
+        except ValueError:
+            print(f"{RED}Invalid max tokens value.{RESET}\n")
+    else:
+        print(f"Max tokens: {ctx.config.get('max_tokens', 1024)}\n")
+
+
+def cmd_system(arg, ctx):
+    if arg:
+        ctx.config["system"] = arg
+        save_config(ctx.config)
+        ctx.rebuild_system_prompt()
+        print(f"{DIM}System prompt set.{RESET}\n")
+    else:
+        print(f"System: {ctx.config.get('system', 'none')}\n")
+
+
+def cmd_history(arg, ctx):
+    if len(ctx.messages) <= 1:
+        print(f"{DIM}No messages.{RESET}\n")
+    else:
+        print()
+        for m in ctx.messages:
+            if m["role"] == "system":
                 continue
-            delta = chunk.choices[0].delta
-            if delta and delta.content:
-                print(delta.content, end="", flush=True)
-                full_response += delta.content
+            role_color = CYAN if m["role"] == "user" else GREEN
+            content_preview = m["content"][:100] + ("..." if len(m["content"]) > 100 else "")
+            print(f"  {role_color}{m['role']}{RESET}: {content_preview}")
+        print()
 
-        print("\n")
-        return full_response
 
-    except KeyboardInterrupt:
-        print(f"\n{DIM}(cancelled){RESET}\n")
-        return None
-    except OpenAIError as e:
-        print(f"\n{RED}API error: {e}{RESET}\n")
-        return None
-    except (ConnectionError, TimeoutError, OSError) as e:
-        print(f"\n{RED}Connection error: {e}{RESET}\n")
-        return None
+def cmd_pwd(arg, ctx):
+    print(f"  {CWD}\n")
 
+
+def cmd_ls(arg, ctx):
+    target = resolve_path(arg) if arg else CWD
+    if not target.is_dir():
+        print(f"{RED}Not a directory: {target}{RESET}\n")
+        return
+    try:
+        entries = sorted(target.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+        entries = [e for e in entries if not should_ignore(e.name)]
+        print()
+        for e in entries:
+            if e.is_dir():
+                print(f"  {CYAN}{e.name}/{RESET}")
+            else:
+                size = format_size(e.stat().st_size)
+                print(f"  {e.name}  {DIM}({size}){RESET}")
+        print()
+    except (OSError, PermissionError) as ex:
+        print(f"{RED}Error: {ex}{RESET}\n")
+
+
+def cmd_tree(arg, ctx):
+    target = resolve_path(arg) if arg else CWD
+    if not target.is_dir():
+        print(f"{RED}Not a directory: {target}{RESET}\n")
+        return
+    print(f"\n  {BOLD}{target.name}/{RESET}")
+    tree = get_tree(target)
+    for line in tree.split("\n"):
+        if line:
+            print(f"  {line}")
+    print()
+
+
+def cmd_read(arg, ctx):
+    if not arg:
+        print(f"{RED}Usage: /read <file>{RESET}\n")
+        return
+    content, info = read_file(arg)
+    if content is None:
+        print(f"{RED}{info}{RESET}\n")
+    else:
+        lines = content.count("\n") + 1
+        print(f"{DIM}Read {info} ({lines} lines) into conversation.{RESET}\n")
+        file_msg = f"Contents of {info}:\n```\n{content}\n```"
+        ctx.messages.append({"role": "user", "content": file_msg})
+
+
+def cmd_write(arg, ctx):
+    if not arg:
+        print(f"{RED}Usage: /write <file>{RESET}\n")
+    elif not ctx.last_response:
+        print(f"{RED}No assistant response to write.{RESET}\n")
+    else:
+        code_blocks = re.findall(r"```(?:\w*\n)?(.*?)```", ctx.last_response, re.DOTALL)
+        content = code_blocks[0].strip() if code_blocks else ctx.last_response
+        ok, info = write_file(arg, content + "\n")
+        if ok:
+            print(f"{DIM}Wrote to {info}{RESET}\n")
+        else:
+            print(f"{RED}{info}{RESET}\n")
+
+
+def cmd_diff(arg, ctx):
+    if not arg:
+        output = run_shell("git diff")
+    else:
+        path, err = safe_resolve_path(arg)
+        if err:
+            print(f"{RED}{err}{RESET}\n")
+            return
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--", str(path)],
+                capture_output=True, text=True, timeout=30, cwd=str(CWD)
+            )
+            output = (result.stdout + result.stderr).strip() or "(no changes)"
+        except (subprocess.TimeoutExpired, OSError) as e:
+            output = f"(error: {e})"
+    print(f"\n{output}\n")
+
+
+def cmd_sh(arg, ctx):
+    if not arg:
+        print(f"{RED}Usage: /sh <command>{RESET}\n")
+    else:
+        output = run_shell(arg)
+        print(f"\n{output}\n")
+
+
+# Command registry
+COMMANDS = {
+    "/quit": cmd_quit, "/exit": cmd_quit, "/q": cmd_quit,
+    "/help": cmd_help,
+    "/clear": cmd_clear,
+    "/config": cmd_config,
+    "/auto": cmd_auto,
+    "/endpoint": cmd_endpoint,
+    "/key": cmd_key,
+    "/model": cmd_model,
+    "/temp": cmd_temp,
+    "/max": cmd_max,
+    "/system": cmd_system,
+    "/history": cmd_history,
+    "/pwd": cmd_pwd,
+    "/ls": cmd_ls,
+    "/tree": cmd_tree,
+    "/read": cmd_read,
+    "/write": cmd_write,
+    "/diff": cmd_diff,
+    "/sh": cmd_sh,
+}
+
+
+# =========================================================================
+# Input handling
+# =========================================================================
 
 def read_input():
     lines = []
@@ -537,7 +821,11 @@ def read_input():
     return "\n".join(lines) if lines else None
 
 
-def main():
+# =========================================================================
+# Main
+# =========================================================================
+
+def parse_args():
     parser = argparse.ArgumentParser(description="CLI chat for vLLM models")
     parser.add_argument("--endpoint", help="API endpoint URL")
     parser.add_argument("--key", help="API key")
@@ -546,10 +834,10 @@ def main():
     parser.add_argument("--max-tokens", type=int, help="Max tokens", default=None)
     parser.add_argument("--system", help="System prompt", default=None)
     parser.add_argument("--auto-approve", action="store_true", help="Skip action confirmations")
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    config = load_config()
 
+def apply_cli_overrides(config, args):
     if args.endpoint:
         config["endpoint"] = args.endpoint
     if args.key:
@@ -564,11 +852,11 @@ def main():
         config["system"] = args.system
     if args.auto_approve:
         config["auto_approve"] = True
+    return config
 
-    save_config(config)
 
+def print_welcome(config):
     auto_approve = config.get("auto_approve", False)
-
     print(f"\n{BOLD}vLLM Chat{RESET} {DIM}(type /help for commands){RESET}")
     print(f"{DIM}Workspace: {CWD}{RESET}")
     if auto_approve:
@@ -579,7 +867,7 @@ def main():
         client = get_client(config)
         if client:
             try:
-                models = client.models.list()
+                models = client.list_models()
                 model_id = models.data[0].id if models.data else "unknown"
                 print(f"{DIM}Connected to {endpoint}{RESET}")
                 print(f"{DIM}Model: {model_id}{RESET}")
@@ -587,15 +875,11 @@ def main():
                 print(f"{YELLOW}Warning: could not connect to {endpoint}: {e}{RESET}")
     else:
         print(f"{YELLOW}No endpoint configured. Use /endpoint URL to set one.{RESET}")
-
     print()
 
-    messages = []
-    system_prompt = build_system_prompt(config)
-    messages.append({"role": "system", "content": system_prompt})
 
-    last_response = None
-
+def repl_loop(ctx):
+    """Main REPL loop — reads input, dispatches commands or sends messages."""
     while True:
         try:
             user_input = read_input()
@@ -617,172 +901,11 @@ def main():
             cmd = parts[0].lower()
             arg = parts[1] if len(parts) > 1 else ""
 
-            if cmd in ("/quit", "/exit", "/q"):
-                print(f"{DIM}Goodbye!{RESET}")
-                break
-            elif cmd == "/help":
-                print_help()
-            elif cmd == "/clear":
-                messages = [{"role": "system", "content": build_system_prompt(config)}]
-                last_response = None
-                print(f"{DIM}Conversation cleared.{RESET}\n")
-            elif cmd == "/config":
-                print_config(config)
-            elif cmd == "/auto":
-                auto_approve = not auto_approve
-                config["auto_approve"] = auto_approve
-                save_config(config)
-                state = f"{GREEN}ON{RESET}" if auto_approve else f"{RED}OFF{RESET}"
-                print(f"{DIM}Auto-approve: {state}\n")
-            elif cmd == "/endpoint":
-                if arg:
-                    config["endpoint"] = arg.rstrip("/")
-                    save_config(config)
-                    print(f"{DIM}Endpoint set to {config['endpoint']}{RESET}\n")
-                else:
-                    print(f"Endpoint: {config.get('endpoint', 'not set')}\n")
-            elif cmd == "/key":
-                if arg:
-                    config["key"] = arg
-                    save_config(config)
-                    print(f"{DIM}API key updated.{RESET}\n")
-                else:
-                    print(f"API key: {'*' * 8 + config['key'][-4:] if config.get('key') else 'not set'}\n")
-            elif cmd == "/model":
-                if arg:
-                    config["model"] = arg
-                    save_config(config)
-                    print(f"{DIM}Model set to {arg}{RESET}\n")
-                else:
-                    print(f"Model: {config.get('model', '/models/weights')}\n")
-            elif cmd == "/temp":
-                if arg:
-                    try:
-                        val = float(arg)
-                        if not 0 <= val <= 2:
-                            print(f"{RED}Temperature must be between 0 and 2.{RESET}\n")
-                        else:
-                            config["temperature"] = val
-                            save_config(config)
-                            print(f"{DIM}Temperature set to {config['temperature']}{RESET}\n")
-                    except ValueError:
-                        print(f"{RED}Invalid temperature value.{RESET}\n")
-                else:
-                    print(f"Temperature: {config.get('temperature', 0.7)}\n")
-            elif cmd == "/max":
-                if arg:
-                    try:
-                        val = int(arg)
-                        if val < 1 or val > 16384:
-                            print(f"{RED}Max tokens must be between 1 and 16384.{RESET}\n")
-                        else:
-                            config["max_tokens"] = val
-                            save_config(config)
-                            print(f"{DIM}Max tokens set to {config['max_tokens']}{RESET}\n")
-                    except ValueError:
-                        print(f"{RED}Invalid max tokens value.{RESET}\n")
-                else:
-                    print(f"Max tokens: {config.get('max_tokens', 1024)}\n")
-            elif cmd == "/system":
-                if arg:
-                    config["system"] = arg
-                    save_config(config)
-                    messages = [m for m in messages if m["role"] != "system"]
-                    messages.insert(0, {"role": "system", "content": build_system_prompt(config)})
-                    print(f"{DIM}System prompt set.{RESET}\n")
-                else:
-                    print(f"System: {config.get('system', 'none')}\n")
-            elif cmd == "/history":
-                if len(messages) <= 1:
-                    print(f"{DIM}No messages.{RESET}\n")
-                else:
-                    print()
-                    for m in messages:
-                        if m["role"] == "system":
-                            continue
-                        role_color = CYAN if m["role"] == "user" else GREEN
-                        content_preview = m["content"][:100] + ("..." if len(m["content"]) > 100 else "")
-                        print(f"  {role_color}{m['role']}{RESET}: {content_preview}")
-                    print()
-            elif cmd == "/pwd":
-                print(f"  {CWD}\n")
-            elif cmd == "/ls":
-                target = resolve_path(arg) if arg else CWD
-                if not target.is_dir():
-                    print(f"{RED}Not a directory: {target}{RESET}\n")
-                else:
-                    try:
-                        entries = sorted(target.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
-                        entries = [e for e in entries if not should_ignore(e.name)]
-                        print()
-                        for e in entries:
-                            if e.is_dir():
-                                print(f"  {CYAN}{e.name}/{RESET}")
-                            else:
-                                size = format_size(e.stat().st_size)
-                                print(f"  {e.name}  {DIM}({size}){RESET}")
-                        print()
-                    except (OSError, PermissionError) as ex:
-                        print(f"{RED}Error: {ex}{RESET}\n")
-            elif cmd == "/tree":
-                target = resolve_path(arg) if arg else CWD
-                if not target.is_dir():
-                    print(f"{RED}Not a directory: {target}{RESET}\n")
-                else:
-                    print(f"\n  {BOLD}{target.name}/{RESET}")
-                    tree = get_tree(target)
-                    for line in tree.split("\n"):
-                        if line:
-                            print(f"  {line}")
-                    print()
-            elif cmd == "/read":
-                if not arg:
-                    print(f"{RED}Usage: /read <file>{RESET}\n")
-                else:
-                    content, info = read_file(arg)
-                    if content is None:
-                        print(f"{RED}{info}{RESET}\n")
-                    else:
-                        lines = content.count("\n") + 1
-                        print(f"{DIM}Read {info} ({lines} lines) into conversation.{RESET}\n")
-                        file_msg = f"Contents of {info}:\n```\n{content}\n```"
-                        messages.append({"role": "user", "content": file_msg})
-            elif cmd == "/write":
-                if not arg:
-                    print(f"{RED}Usage: /write <file>{RESET}\n")
-                elif not last_response:
-                    print(f"{RED}No assistant response to write.{RESET}\n")
-                else:
-                    code_blocks = re.findall(r"```(?:\w*\n)?(.*?)```", last_response, re.DOTALL)
-                    content = code_blocks[0].strip() if code_blocks else last_response
-                    ok, info = write_file(arg, content + "\n")
-                    if ok:
-                        print(f"{DIM}Wrote to {info}{RESET}\n")
-                    else:
-                        print(f"{RED}{info}{RESET}\n")
-            elif cmd == "/diff":
-                if not arg:
-                    output = run_shell("git diff")
-                else:
-                    path, err = safe_resolve_path(arg)
-                    if err:
-                        print(f"{RED}{err}{RESET}\n")
-                        continue
-                    try:
-                        result = subprocess.run(
-                            ["git", "diff", "--", str(path)],
-                            capture_output=True, text=True, timeout=30, cwd=str(CWD)
-                        )
-                        output = (result.stdout + result.stderr).strip() or "(no changes)"
-                    except (subprocess.TimeoutExpired, OSError) as e:
-                        output = f"(error: {e})"
-                print(f"\n{output}\n")
-            elif cmd == "/sh":
-                if not arg:
-                    print(f"{RED}Usage: /sh <command>{RESET}\n")
-                else:
-                    output = run_shell(arg)
-                    print(f"\n{output}\n")
+            handler = COMMANDS.get(cmd)
+            if handler:
+                result = handler(arg, ctx)
+                if result == "quit":
+                    break
             else:
                 print(f"{RED}Unknown command: {cmd}. Type /help for commands.{RESET}\n")
             continue
@@ -794,32 +917,46 @@ def main():
             print(f"{DIM}Attached: {filenames}{RESET}")
 
         # Send message
-        client = get_client(config)
+        client = get_client(ctx.config)
         if not client:
             continue
 
-        messages.append({"role": "user", "content": text})
-        response = stream_response(client, messages, config)
+        ctx.messages.append({"role": "user", "content": text})
+        response = stream_response(client, ctx.messages, ctx.config)
 
         if response:
-            messages.append({"role": "assistant", "content": response})
-            last_response = response
+            ctx.messages.append({"role": "assistant", "content": response})
+            ctx.last_response = response
 
             # Process autonomous actions
-            actions = process_actions(response, messages, auto_approve)
+            actions = process_actions(response, ctx.messages, ctx.auto_approve)
             if actions:
-                # If there were read_file or run_command actions, send results back to model
                 has_followup = any("Read " in a or "Ran " in a for a in actions)
                 if has_followup:
                     print(f"{DIM}Sending action results back to model...{RESET}")
-                    followup = stream_response(client, messages, config)
+                    followup = stream_response(client, ctx.messages, ctx.config)
                     if followup:
-                        messages.append({"role": "assistant", "content": followup})
-                        last_response = followup
-                        # Process any actions in the followup too
-                        process_actions(followup, messages, auto_approve)
+                        ctx.messages.append({"role": "assistant", "content": followup})
+                        ctx.last_response = followup
+                        process_actions(followup, ctx.messages, ctx.auto_approve)
         else:
-            messages.pop()
+            ctx.messages.pop()
+
+
+def main():
+    args = parse_args()
+    config = load_config()
+    config = apply_cli_overrides(config, args)
+    save_config(config)
+
+    print_welcome(config)
+
+    workspace = gather_workspace_context()
+    system_prompt = build_system_prompt(config, workspace)
+    messages = [{"role": "system", "content": system_prompt}]
+    ctx = ChatContext(config, messages)
+
+    repl_loop(ctx)
 
 
 if __name__ == "__main__":
