@@ -136,8 +136,6 @@ def safe_resolve_path(path_str):
     """Resolve path and verify it's within CWD to prevent traversal."""
     if not path_str or not SAFE_PATH_PATTERN.match(path_str):
         return None, f"Invalid path characters: {path_str!r}"
-    if '\x00' in path_str:
-        return None, f"Null byte in path: {path_str!r}"
     p = resolve_path(path_str)
     try:
         p.relative_to(CWD)

@@ -43,8 +43,8 @@
   var id = config.id || 'default';
   var mode = config.mode || 'simple';
   var stripThinking = config.stripThinking !== false;
-  var defaultMaxTokens = config.maxTokens || 1500;
-  var defaultTemperature = config.temperature || 0.7;
+  var defaultMaxTokens = config.maxTokens != null ? config.maxTokens : 1500;
+  var defaultTemperature = config.temperature != null ? config.temperature : 0.7;
   var responseProcessors = config.responseProcessors || [];
   var preconfiguredEndpoint = config.endpoint || '';
   var preconfiguredApiKey = config.apikey || '';
@@ -583,14 +583,15 @@
 
   function retry() {
     if (generating || messages.length < 2) return;
+    var lastChild;
     if (messages[messages.length - 1]?.role === 'assistant') {
       messages.pop();
-      var lastChild = dom.chat.lastElementChild;
+      lastChild = dom.chat.lastElementChild;
       if (lastChild) dom.chat.removeChild(lastChild);
     }
     if (messages[messages.length - 1]?.role === 'user') {
       var lastUserMsg = messages.pop();
-      var lastChild = dom.chat.lastElementChild;
+      lastChild = dom.chat.lastElementChild;
       if (lastChild) dom.chat.removeChild(lastChild);
       dom.prompt.value = lastUserMsg.content;
       send();
