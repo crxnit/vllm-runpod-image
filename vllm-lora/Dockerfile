@@ -1,0 +1,44 @@
+# =============================================================================
+# vLLM OpenAI-compatible server — RunPod-ready
+#
+# Build & push to Docker Hub (free, public — no private registry needed):
+#   ./build.sh <dockerhub-username> <tag>
+#
+# Then in RunPod → New Pod → Container Image:
+#   <dockerhub-username>/vllm-lora:<tag>
+#
+# All runtime settings are controlled by environment variables.
+# See start.sh for the full variable reference.
+# =============================================================================
+
+FROM vllm/vllm-openai:latest
+
+# Install Python packages used by the accounting-classification scripts:
+#   Client scripts (classify.py, classify_hybrid.py, normalize_qb_export.py):
+#     - requests      HTTP calls to the vLLM /v1 endpoint
+#     - pandas        CSV loading / transaction dataframe processing
+#   Training script (train_lora_gpu.py):
+#     - transformers  AutoModelForCausalLM, AutoTokenizer
+#     - peft          LoraConfig, get_peft_model
+#     - trl           SFTTrainer, SFTConfig
+#     - datasets      HuggingFace dataset streaming (Finance-Instruct-500k)
+#     - accelerate    multi-GPU / distributed training backend
+#     - bitsandbytes  4-bit QLoRA quantization (--quantize flag)
+RUN pip install --no-cache-dir \
+    requests \
+    pandas \
+    transformers \
+    peft \
+    trl \
+    datasets \
+    accelerate \
+    bitsandbytes
+
+WORKDIR /app
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# vLLM serves the OpenAI-compatible API on 8000; RunPod proxies this port.
+EXPOSE 8000
+
+CMD ["/app/start.sh"]
