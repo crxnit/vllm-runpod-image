@@ -35,7 +35,7 @@ RUN pip install --no-cache-dir \
     bitsandbytes
 
 WORKDIR /app
-COPY start.sh /app/start.sh
+COPY vllm-lora/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # vLLM serves the OpenAI-compatible API on 8000; RunPod proxies this port.
