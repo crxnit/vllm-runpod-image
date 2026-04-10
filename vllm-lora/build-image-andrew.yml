@@ -88,8 +88,12 @@ jobs:
           docker run --rm \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
             python3 -c "
-          import requests, pandas, transformers, peft, trl, datasets, accelerate, bitsandbytes
-          print('All required packages are importable')
+          import importlib.util
+          packages = ['requests', 'pandas', 'transformers', 'peft', 'trl', 'datasets', 'accelerate', 'bitsandbytes']
+          for pkg in packages:
+              assert importlib.util.find_spec(pkg) is not None, f'{pkg} package not found'
+              print(f'{pkg} package present')
+          print('All required packages are present')
           "
 
       - name: Check start.sh is executable inside image
