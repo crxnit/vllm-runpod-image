@@ -1,0 +1,130 @@
+name: Build vLLM LoRA image
+
+# Builds and pushes the base vllm-lora image (no model weights baked in).
+# Trigger via CLI:  gh workflow run build-image.yml
+# Custom tag:      gh workflow run build-image.yml -f tag=v1.0
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Custom image tag (instead of latest)"
+        required: false
+        default: "latest"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Free up disk space
+        run: |
+          echo "=== Before cleanup ==="
+          df -h /
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/graalvm
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/local/share/chromium
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo docker image prune --all --force
+          sudo docker builder prune --all --force
+          echo "=== After cleanup ==="
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tag
+        id: image-tag
+        run: |
+          TAG="${{ github.event.inputs.tag || 'latest' }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG"
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,scope=base,mode=max
+
+      - name: Verify Python packages are installed
+        if: github.event_name != 'pull_request'
+        run: |
+          docker run --rm \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
+            python3 -c "
+          import requests, pandas, transformers, peft, trl, datasets, accelerate, bitsandbytes
+          print('All required packages are importable')
+          "
+
+      - name: Check start.sh is executable inside image
+        if: github.event_name != 'pull_request'
+        run: |
+          docker run --rm \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
+            test -x /app/start.sh
+          echo "start.sh is executable"
+
+      - name: Check vLLM entrypoint exists
+        if: github.event_name != 'pull_request'
+        run: |
+          docker run --rm \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
+            which vllm
+          echo "vllm binary found"
+
+      - name: Print image details
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Image pushed successfully!"
+          echo ""
+          echo "Tags:"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo ""
+          echo "Use in RunPod template:"
+          echo "  ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }}"
+          echo ""
+          echo "Recommended RunPod environment variables:"
+          echo "  MODEL_NAME       = Qwen/Qwen2.5-7B-Instruct"
+          echo "  HF_TOKEN         = <your HuggingFace token, if model is gated>"
+          echo "  API_KEY          = <secret key your classify scripts will use>"
+          echo "  MAX_MODEL_LEN    = 4096"
+          echo "  GPU_MEMORY_UTIL  = 0.90"
+          echo "  ENABLE_LORA      = false"
+          echo "  SKIP_PIP_INSTALL = true"
