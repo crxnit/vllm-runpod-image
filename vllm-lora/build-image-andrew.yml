@@ -73,7 +73,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
+          file:vllm-lora/Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
@@ -81,6 +81,22 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha,scope=base
           cache-to: type=gha,scope=base,mode=max
+
+      - name: Verify CUDA is installed inside image
+        if: github.event_name != 'pull_request'
+        run: |
+          docker run --rm \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
+            bash -c "
+              set -e
+              # Verify CUDA toolkit files are present (no GPU hardware required)
+              test -d /usr/local/cuda || { echo 'ERROR: /usr/local/cuda not found'; exit 1; }
+              CUDA_VERSION=\$(cat /usr/local/cuda/version.txt 2>/dev/null || cat /usr/local/cuda/version.json 2>/dev/null || nvcc --version 2>/dev/null | grep 'release' | awk '{print \$6}' | tr -d ,)
+              echo \"CUDA installed: \${CUDA_VERSION}\"
+              # Verify CUDA libraries are present
+              ldconfig -p | grep -q libcuda || test -f /usr/local/cuda/lib64/libcudart.so* || ls /usr/local/cuda/lib64/libcudart* > /dev/null 2>&1
+              echo 'CUDA installation verified'
+            "
 
       - name: Verify Python packages are installed
         if: github.event_name != 'pull_request'
