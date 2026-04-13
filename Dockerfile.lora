@@ -24,6 +24,13 @@ RUN echo "/usr/local/cuda/compat" > /etc/ld.so.conf.d/cuda-compat.conf \
 ENV CUDA_HOME=/usr/local/cuda
 ENV LD_LIBRARY_PATH=/usr/local/cuda/compat:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
 
+# Tell vLLM to target CUDA without relying on NVML auto-detection.
+# Without this, vLLM's argument-parser setup calls VllmConfig() to build
+# default values, which triggers device inference; if NVML isn't yet visible
+# (driver bind-mount timing on RunPod) it raises:
+#   RuntimeError: Failed to infer device type
+ENV VLLM_TARGET_DEVICE=cuda
+
 # Enable verbose vLLM logging to surface startup/device-detection issues.
 ENV VLLM_LOGGING_LEVEL=DEBUG
 

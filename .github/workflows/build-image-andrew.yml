@@ -84,6 +84,7 @@ jobs:
           docker run --rm \
             -e NVIDIA_VISIBLE_DEVICES=all \
             -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+            -e VLLM_TARGET_DEVICE=cuda \
             -e LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/cuda/lib64 \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
             bash -c "
@@ -101,6 +102,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker run --rm \
+            -e VLLM_TARGET_DEVICE=cuda \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
             python3 -c "
           import importlib.util
@@ -115,6 +117,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker run --rm \
+            -e VLLM_TARGET_DEVICE=cuda \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
             test -x /app/start.sh
           echo "start.sh is executable"
@@ -123,9 +126,19 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker run --rm \
+            -e VLLM_TARGET_DEVICE=cuda \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
             which vllm
           echo "vllm binary found"
+
+      - name: Verify vLLM CLI argument parser works
+        if: github.event_name != 'pull_request'
+        run: |
+          docker run --rm \
+            -e VLLM_TARGET_DEVICE=cuda \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
+            vllm serve --help > /dev/null
+          echo "vllm serve --help succeeded (argument parser initialized without error)"
 
       - name: Print image details
         if: github.event_name != 'pull_request'

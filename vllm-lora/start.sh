@@ -43,6 +43,15 @@ export LD_LIBRARY_PATH="/usr/local/cuda/compat:/usr/local/cuda/lib64${LD_LIBRARY
 # and bitsandbytes/PyTorch can find the CUDA runtime via find_library('cudart').
 ldconfig 2>/dev/null || true
 
+# Tell vLLM to target CUDA without relying on NVML auto-detection.
+# vLLM's argument-parser setup instantiates VllmConfig() to compute default
+# values; that triggers device inference, which calls into NVML.  If the
+# NVIDIA driver bind-mount hasn't completed yet (common on RunPod start),
+# NVML reports "Shared Library Not Found" and vLLM raises:
+#   RuntimeError: Failed to infer device type
+# Setting this env var bypasses the inference and hard-codes the target device.
+export VLLM_TARGET_DEVICE="${VLLM_TARGET_DEVICE:-cuda}"
+
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
 GPU_MEMORY_UTIL="${GPU_MEMORY_UTIL:-0.90}"
