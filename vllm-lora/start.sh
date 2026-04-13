@@ -38,6 +38,11 @@ set -euo pipefail
 # container is run without the custom image (e.g. bare vllm/vllm-openai).
 export LD_LIBRARY_PATH="/usr/local/cuda/compat:/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
+# RunPod bind-mounts /usr/local/cuda from the host at container start, after
+# the Dockerfile's ldconfig ran.  Re-run it now so libcudart.so is registered
+# and bitsandbytes/PyTorch can find the CUDA runtime via find_library('cudart').
+ldconfig 2>/dev/null || true
+
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
 GPU_MEMORY_UTIL="${GPU_MEMORY_UTIL:-0.90}"
