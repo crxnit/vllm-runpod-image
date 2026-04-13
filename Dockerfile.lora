@@ -13,31 +13,6 @@
 
 FROM vllm/vllm-openai:latest
 
-# Make libcuda.so.1 (and other CUDA libs) discoverable.
-# The CUDA compat stub lives in /usr/local/cuda/compat inside the base image
-# but is not registered with ldconfig by default, causing:
-#   "Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open …')"
-RUN echo "/usr/local/cuda/compat" > /etc/ld.so.conf.d/cuda-compat.conf \
-    && echo "/usr/local/cuda/lib64"  >> /etc/ld.so.conf.d/cuda-compat.conf \
-    && ldconfig
-
-ENV CUDA_HOME=/usr/local/cuda
-# /usr/local/nvidia/lib64 contains libnvidia-ml.so (NVML), which is bind-mounted
-# from the RunPod host at container start.  Including it here ensures vLLM's
-# platform detection can find NVML once the mount is ready (start.sh waits for
-# nvidia-smi before invoking vllm, so the mount will be present by then).
-ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/cuda/compat:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
-
-# Tell vLLM to target CUDA without relying on NVML auto-detection.
-# Without this, vLLM's argument-parser setup calls VllmConfig() to build
-# default values, which triggers device inference; if NVML isn't yet visible
-# (driver bind-mount timing on RunPod) it raises:
-#   RuntimeError: Failed to infer device type
-ENV VLLM_TARGET_DEVICE=cuda
-
-# Enable verbose vLLM logging to surface startup/device-detection issues.
-ENV VLLM_LOGGING_LEVEL=DEBUG
-
 # Install Python packages used by the accounting-classification scripts:
 #   Client scripts (classify.py, classify_hybrid.py, normalize_qb_export.py):
 #     - requests      HTTP calls to the vLLM /v1 endpoint
