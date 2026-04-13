@@ -48,7 +48,6 @@ TENSOR_PARALLEL="${TENSOR_PARALLEL:-${RUNPOD_GPU_COUNT:-1}}"
 # Installs packages required by the accounting-classification scripts so that
 # the public vllm/vllm-openai:latest image can be used on RunPod without
 # building or pushing a custom Docker image.
-# Skip by setting SKIP_PIP_INSTALL=true (e.g. when using an image from build.sh).
 # ---------------------------------------------------------------------------
 
 # HuggingFace token for gated/private models
@@ -58,7 +57,7 @@ if [[ -n "${HF_TOKEN:-}" ]]; then
 fi
 
 ARGS=(
-    --model              "${MODEL_NAME}"
+    --model "${MODEL_NAME}"
 )
 
 # Optional bearer-token auth (passed as --api-key to classify scripts via --api-key flag)
@@ -68,7 +67,6 @@ if [[ "${ENABLE_LORA}" == "true" ]]; then
     ARGS+=(--enable-lora)
     if [[ -n "${LORA_PATH:-}" ]]; then
         ARGS+=(--lora-modules "adapter=${LORA_PATH}")
-        echo " LoRA adapter : ${LORA_PATH}"
     fi
 fi
 
