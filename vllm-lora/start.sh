@@ -60,14 +60,9 @@ if [[ -n "${HF_TOKEN:-}" ]]; then
 fi
 
 ARGS=(
-    --model            "${MODEL_NAME}"
-    --device           cuda
-    --dtype            "${DTYPE}"
-    --max-model-len    "${MAX_MODEL_LEN}"
-    --gpu-memory-utilization "${GPU_MEMORY_UTIL}"
-    --tensor-parallel-size   "${TENSOR_PARALLEL}"
-    --host             "${HOST}"
-    --port             "${PORT}"
+    --model "${MODEL_NAME}"
+    --host "${HOST}"
+    --port "${PORT}"
 )
 
 # LoRA adapter support
