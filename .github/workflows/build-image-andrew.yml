@@ -82,6 +82,9 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker run --rm \
+            -e NVIDIA_VISIBLE_DEVICES=all \
+            -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+            -e LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/cuda/lib64 \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
             bash -c "
               set -e
@@ -144,3 +147,15 @@ jobs:
           echo "  GPU_MEMORY_UTIL  = 0.90"
           echo "  ENABLE_LORA      = false"
           echo "  SKIP_PIP_INSTALL = true"
+          echo ""
+          echo "Recommended Helm values:"
+          echo "  helm:"
+          echo "    values:"
+          echo "      runtimeClassName: nvidia"
+          echo "    env:"
+          echo "      - name: NVIDIA_VISIBLE_DEVICES"
+          echo "        value: \"all\""
+          echo "      - name: NVIDIA_DRIVER_CAPABILITIES"
+          echo "        value: \"compute,utility\""
+          echo "      - name: LD_LIBRARY_PATH"
+          echo "        value: \"/usr/local/nvidia/lib64:/usr/local/cuda/lib64:\$(LD_LIBRARY_PATH)\""
