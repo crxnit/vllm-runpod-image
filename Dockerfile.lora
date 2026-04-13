@@ -41,5 +41,3 @@ RUN chmod +x /app/start.sh
 
 # vLLM serves the OpenAI-compatible API on 8000; RunPod proxies this port.
 EXPOSE 8000
-
-ENTRYPOINT ["/app/start.sh"]
