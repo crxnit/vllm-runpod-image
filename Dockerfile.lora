@@ -13,6 +13,16 @@
 
 FROM vllm/vllm-openai:latest
 
+# Make libcuda.so.1 (and other CUDA libs) discoverable.
+# The CUDA compat stub lives in /usr/local/cuda/compat inside the base image
+# but is not registered with ldconfig by default, causing:
+#   "Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open …')"
+RUN echo "/usr/local/cuda/compat" > /etc/ld.so.conf.d/cuda-compat.conf \
+    && echo "/usr/local/cuda/lib64"  >> /etc/ld.so.conf.d/cuda-compat.conf \
+    && ldconfig
+
+ENV LD_LIBRARY_PATH=/usr/local/cuda/compat:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
+
 # Install Python packages used by the accounting-classification scripts:
 #   Client scripts (classify.py, classify_hybrid.py, normalize_qb_export.py):
 #     - requests      HTTP calls to the vLLM /v1 endpoint

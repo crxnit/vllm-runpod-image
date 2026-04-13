@@ -32,6 +32,12 @@ set -euo pipefail
 #
 # =============================================================================
 
+# Ensure the CUDA compat stub (libcuda.so.1) and CUDA libs are on the
+# dynamic-linker search path.  The Dockerfile already calls ldconfig, but
+# exporting LD_LIBRARY_PATH here guards against environments where the
+# container is run without the custom image (e.g. bare vllm/vllm-openai).
+export LD_LIBRARY_PATH="/usr/local/cuda/compat:/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
 GPU_MEMORY_UTIL="${GPU_MEMORY_UTIL:-0.90}"
