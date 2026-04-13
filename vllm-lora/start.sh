@@ -54,6 +54,9 @@ PORT="${PORT:-8000}"
 # Auto-detect GPU count from RunPod's injected env var; fall back to 1.
 TENSOR_PARALLEL="${TENSOR_PARALLEL:-${RUNPOD_GPU_COUNT:-1}}"
 
+# Enable verbose vLLM logging (can be overridden at runtime by setting VLLM_LOGGING_LEVEL).
+export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-DEBUG}"
+
 # ---------------------------------------------------------------------------
 # Runtime dependency installation
 # Installs packages required by the accounting-classification scripts so that
@@ -68,10 +71,15 @@ if [[ -n "${HF_TOKEN:-}" ]]; then
 fi
 
 ARGS=(
-    --model "${MODEL_NAME}"
+    --model            "${MODEL_NAME}"
+    --device           cuda
+    --dtype            "${DTYPE}"
+    --max-model-len    "${MAX_MODEL_LEN}"
+    --gpu-memory-utilization "${GPU_MEMORY_UTIL}"
+    --tensor-parallel-size   "${TENSOR_PARALLEL}"
+    --host             "${HOST}"
+    --port             "${PORT}"
 )
-
-# Optional bearer-token auth (passed as --api-key to classify scripts via --api-key flag)
 
 # LoRA adapter support
 if [[ "${ENABLE_LORA}" == "true" ]]; then

@@ -24,6 +24,9 @@ RUN echo "/usr/local/cuda/compat" > /etc/ld.so.conf.d/cuda-compat.conf \
 ENV CUDA_HOME=/usr/local/cuda
 ENV LD_LIBRARY_PATH=/usr/local/cuda/compat:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
 
+# Enable verbose vLLM logging to surface startup/device-detection issues.
+ENV VLLM_LOGGING_LEVEL=DEBUG
+
 # Install Python packages used by the accounting-classification scripts:
 #   Client scripts (classify.py, classify_hybrid.py, normalize_qb_export.py):
 #     - requests      HTTP calls to the vLLM /v1 endpoint
