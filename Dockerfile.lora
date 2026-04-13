@@ -22,7 +22,11 @@ RUN echo "/usr/local/cuda/compat" > /etc/ld.so.conf.d/cuda-compat.conf \
     && ldconfig
 
 ENV CUDA_HOME=/usr/local/cuda
-ENV LD_LIBRARY_PATH=/usr/local/cuda/compat:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
+# /usr/local/nvidia/lib64 contains libnvidia-ml.so (NVML), which is bind-mounted
+# from the RunPod host at container start.  Including it here ensures vLLM's
+# platform detection can find NVML once the mount is ready (start.sh waits for
+# nvidia-smi before invoking vllm, so the mount will be present by then).
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/cuda/compat:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
 
 # Tell vLLM to target CUDA without relying on NVML auto-detection.
 # Without this, vLLM's argument-parser setup calls VllmConfig() to build

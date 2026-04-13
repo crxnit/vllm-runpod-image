@@ -32,16 +32,12 @@ set -euo pipefail
 #
 # =============================================================================
 
-# Ensure the CUDA compat stub (libcuda.so.1) and CUDA libs are on the
-# dynamic-linker search path.  The Dockerfile already calls ldconfig, but
-# exporting LD_LIBRARY_PATH here guards against environments where the
-# container is run without the custom image (e.g. bare vllm/vllm-openai).
-export LD_LIBRARY_PATH="/usr/local/cuda/compat:/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-
-# RunPod bind-mounts /usr/local/cuda from the host at container start, after
-# the Dockerfile's ldconfig ran.  Re-run it now so libcudart.so is registered
-# and bitsandbytes/PyTorch can find the CUDA runtime via find_library('cudart').
-ldconfig 2>/dev/null || true
+# Ensure CUDA and NVIDIA driver libraries are on the dynamic-linker search path.
+# /usr/local/nvidia/lib64 contains libnvidia-ml.so (NVML) which is bind-mounted
+# from the host by RunPod after container start.  It must be on LD_LIBRARY_PATH
+# so vLLM's platform detection can find it when VllmConfig() is instantiated
+# during argparse setup (before --device cuda is parsed from the command line).
+export LD_LIBRARY_PATH="/usr/local/nvidia/lib64:/usr/local/cuda/compat:/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # Tell vLLM to target CUDA without relying on NVML auto-detection.
 # vLLM's argument-parser setup instantiates VllmConfig() to compute default
@@ -51,6 +47,32 @@ ldconfig 2>/dev/null || true
 #   RuntimeError: Failed to infer device type
 # Setting this env var bypasses the inference and hard-codes the target device.
 export VLLM_TARGET_DEVICE="${VLLM_TARGET_DEVICE:-cuda}"
+
+# Wait for the NVIDIA driver bind-mount to complete before invoking vllm.
+# RunPod mounts /usr/local/nvidia (containing libnvidia-ml.so) from the host
+# after container start.  vLLM's argparse setup calls VllmConfig() as a default
+# factory during __init__, which immediately checks NVML.  If the mount isn't
+# done yet, NVML reports "Shared Library Not Found" and the CLI fails before
+# --device cuda is even parsed.  Polling nvidia-smi ensures the driver is
+# accessible before we attempt to start the server.
+echo "[start.sh] Waiting for NVIDIA driver to become available..."
+for i in $(seq 1 15); do
+    if nvidia-smi --query-gpu=name --format=csv,noheader &>/dev/null; then
+        GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)"
+        echo "[start.sh] GPU available: ${GPU_NAME}"
+        break
+    fi
+    if [[ $i -eq 15 ]]; then
+        echo "[start.sh] ERROR: GPU not available after 30 seconds. Aborting."
+        exit 1
+    fi
+    echo "[start.sh] Attempt ${i}/15: NVIDIA driver not yet available, retrying in 2s..."
+    sleep 2
+done
+
+# Re-run ldconfig after the NVIDIA driver bind mount is confirmed available so
+# that libnvidia-ml.so and libcudart.so are registered for the dynamic linker.
+ldconfig 2>/dev/null || true
 
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"

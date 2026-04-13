@@ -131,14 +131,21 @@ jobs:
             which vllm
           echo "vllm binary found"
 
-      - name: Verify vLLM CLI argument parser works
+      - name: Verify vLLM can be imported
         if: github.event_name != 'pull_request'
         run: |
           docker run --rm \
             -e VLLM_TARGET_DEVICE=cuda \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.image-tag.outputs.tag }} \
-            vllm serve --help > /dev/null
-          echo "vllm serve --help succeeded (argument parser initialized without error)"
+            python3 -c "import vllm; print('vllm version:', vllm.__version__)"
+          echo "vllm import succeeded"
+          # NOTE: 'vllm serve --help' cannot be used here because the GitHub
+          # Actions runner has no GPU.  vLLM's argparse setup calls VllmConfig()
+          # as a default factory during __init__, which triggers NVML platform
+          # detection.  Without an NVIDIA driver, NVML reports "Shared Library
+          # Not Found" and the CLI raises RuntimeError: Failed to infer device
+          # type — even when VLLM_TARGET_DEVICE=cuda is set.  Importing the
+          # package does not instantiate VllmConfig, so it works without GPU.
 
       - name: Print image details
         if: github.event_name != 'pull_request'
