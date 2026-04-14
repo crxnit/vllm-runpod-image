@@ -16,11 +16,11 @@ FROM vllm/vllm-openai:v0.11.2
 # --- bake model weights ---
 ENV HF_HOME=/root/.cache/huggingface
 ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
-ARG QUANTIZATION=""
-ENV QUANTIZATION=${QUANTIZATION}
+ENV QUANTIZATION=""
 ENV ENABLE_LORA=true
-ARG MODEL=Qwen/Qwen2.5-7B-Instruct
+ENV MODEL=Qwen/Qwen2.5-7B-Instruct
 ARG HF_TOKEN=""
+
 
 # Install Python packages used by the accounting-classification scripts:
 #   Client scripts (classify.py, classify_hybrid.py, normalize_qb_export.py):
@@ -36,20 +36,23 @@ ARG HF_TOKEN=""
 # --- shared base (keep in sync with Dockerfile.baked) ---
 RUN pip install --no-cache-dir "huggingface_hub[cli,hf_xet]" tiktoken \
     requests \
-    pandas \
-    transformers \
-    peft \
-    trl \
-    datasets \
-    accelerate \
-    triton \
-    bitsandbytes
+    pandas
+#    transformers \
+#    peft \
+#    trl \
+#    datasets \
+#    accelerate \
+#    bitsandbytes
+
+RUN if [ -n "$HF_TOKEN" ]; then export HF_TOKEN="$HF_TOKEN"; fi && \
+    python3 -c "..." "${MODEL}"
 
 WORKDIR /app
 COPY scripts/start-lora.sh /start-lora.sh
+# eventually COPY train_lora_gpu.py
 RUN chmod +x /start-lora.sh
 
 # vLLM serves the OpenAI-compatible API on 8000; RunPod proxies this port.
 EXPOSE 8000
 
-ENTRYPOINT ["start-lora.sh"]
+ENTRYPOINT ["/start-lora.sh"]
