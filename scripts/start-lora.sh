@@ -32,7 +32,7 @@ set -euo pipefail
 #
 # =============================================================================
 
-MODEL_NAME="${MODEL_NAME}"
+MODEL_NAME="${MODEL}"
 MAX_LEN="${MAX_MODEL_LEN:-4096}"
 GPU_MEMORY_UTIL="${GPU_MEMORY_UTIL:-0.90}"
 ENABLE_LORA="${ENABLE_LORA:true}"
