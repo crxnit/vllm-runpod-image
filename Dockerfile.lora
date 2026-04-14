@@ -13,13 +13,12 @@
 
 FROM vllm/vllm-openai:v0.11.2
 
-# --- shared base (keep in sync with Dockerfile.baked) ---
-RUN pip install --no-cache-dir "huggingface_hub[cli,hf_xet]" tiktoken
-
+# --- bake model weights ---
 ENV HF_HOME=/root/.cache/huggingface
 ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
-
-# --- bake model weights ---
+ARG QUANTIZATION=""
+ENV QUANTIZATION=${QUANTIZATION}
+ENV ENABLE_LORA=true
 ARG MODEL=Qwen/Qwen2.5-7B-Instruct
 ARG HF_TOKEN=""
 
@@ -34,7 +33,8 @@ ARG HF_TOKEN=""
 #     - datasets      HuggingFace dataset streaming (Finance-Instruct-500k)
 #     - accelerate    multi-GPU / distributed training backend
 #     - bitsandbytes  4-bit QLoRA quantization (--quantize flag)
-RUN pip install --no-cache-dir \
+# --- shared base (keep in sync with Dockerfile.baked) ---
+RUN pip install --no-cache-dir "huggingface_hub[cli,hf_xet]" tiktoken \
     requests \
     pandas \
     transformers \
@@ -52,9 +52,4 @@ RUN chmod +x /start-lora.sh
 # vLLM serves the OpenAI-compatible API on 8000; RunPod proxies this port.
 EXPOSE 8000
 
-ARG QUANTIZATION=""
-ENV QUANTIZATION=${QUANTIZATION}
-ENV ENABLE_LORA=true
-
-ENTRYPOINT ["/start.sh"]
-CMD []
+ENTRYPOINT ["start-lora.sh"]
