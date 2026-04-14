@@ -45,7 +45,9 @@ RUN pip install --no-cache-dir "huggingface_hub[cli,hf_xet]" tiktoken \
 #    bitsandbytes
 
 RUN if [ -n "$HF_TOKEN" ]; then export HF_TOKEN="$HF_TOKEN"; fi && \
-    python3 -c "..." "${MODEL}"
+    python3 -c "import sys, re; from huggingface_hub import snapshot_download; \
+    m = sys.argv[1]; assert re.match(r'^[A-Za-z0-9._/-]+$', m), f'Invalid model name: {m}'; \
+    snapshot_download(m, local_dir='/models/weights')" "${MODEL}"
 
 WORKDIR /app
 COPY scripts/start-lora.sh /start-lora.sh
