@@ -15,9 +15,6 @@ FROM vllm/vllm-openai:v0.11.2
 
 # --- bake model weights ---
 ENV HF_HOME=/root/.cache/huggingface
-ENV VLLM_WORKER_MULTIPROC_METHOD=spawn
-ENV QUANTIZATION=""
-ENV ENABLE_LORA=true
 ENV MODEL=Qwen/Qwen2.5-7B-Instruct
 ARG HF_TOKEN=""
 

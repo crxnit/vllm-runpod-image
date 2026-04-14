@@ -32,13 +32,14 @@ set -euo pipefail
 #
 # =============================================================================
 
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct}"
-MAX_MODEL_LEN="${MAX_MODEL_LEN:-4096}"
+MODEL_NAME="${MODEL_NAME}"
+MAX_LEN="${MAX_MODEL_LEN:-4096}"
 GPU_MEMORY_UTIL="${GPU_MEMORY_UTIL:-0.90}"
-DTYPE="${DTYPE:-auto}"
-ENABLE_LORA="${ENABLE_LORA:-false}"
+ENABLE_LORA="${ENABLE_LORA:true}"
 HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8000}"
+VLLM_WORKER_MULTIPROC_METHOD=spawn
+QUANTIZATION=""
 
 # Auto-detect GPU count from RunPod's injected env var; fall back to 1.
 TENSOR_PARALLEL="${TENSOR_PARALLEL:-${RUNPOD_GPU_COUNT:-1}}"
@@ -61,6 +62,7 @@ fi
 
 ARGS=(
     --model "${MODEL_NAME}"
+    --max-model-len "${MAX_LEN}"
     --host "${HOST}"
     --port "${PORT}"
 )
@@ -73,4 +75,4 @@ if [[ "${ENABLE_LORA}" == "true" ]]; then
     fi
 fi
 
-exec vllm serve "${ARGS[@]}"
+exec vllm serve /models/weights "${ARGS[@]}"
